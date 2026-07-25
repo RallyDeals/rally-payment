@@ -58,8 +58,11 @@ public class Payment extends AbstractAggregateRoot<Payment> {
     @Column(name = "authorized_at")
     private Instant authorizedAt;
 
-    @Column(name = "paid_at")
-    private Instant paidAt;
+    @Column(name = "charged_at")
+    private Instant chargedAt;
+
+    @Column(name = "captured_at")
+    private Instant capturedAt;
 
     @Column(name = "failed_at")
     private Instant failedAt;
@@ -118,9 +121,9 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         status = PaymentStatus.CHARGED;
         this.paymentIntentId = paymentIntentId;
         this.failureReason = null;
-        this.paidAt = Instant.now();
+        this.chargedAt = Instant.now();
 
-        registerEvent(new PaymentCaptured(this.id, this.paymentIntentId, this.orderId, this.amount));
+        registerEvent(new PaymentCharged(this.id, this.paymentIntentId, this.orderId, this.amount));
     }
 
     public void capture() {
@@ -133,9 +136,9 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         }
 
         status = PaymentStatus.CAPTURED;
-        this.paidAt = Instant.now();
+        this.capturedAt = Instant.now();
 
-        registerEvent(new PaymentCharged(this.id, this.paymentIntentId, this.orderId, this.amount));
+        registerEvent(new PaymentCaptured(this.id, this.paymentIntentId, this.orderId, this.amount));
     }
 
     public void authorize(UUID paymentMethodId, String paymentIntentId) {
