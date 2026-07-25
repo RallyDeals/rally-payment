@@ -1,4 +1,4 @@
-package com.rally.payment.domain.aggregate.events;
+package com.rally.payment.events;
 
 import java.io.Serializable;
 import java.math.BigDecimal;

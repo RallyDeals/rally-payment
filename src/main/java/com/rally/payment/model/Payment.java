@@ -1,15 +1,14 @@
-package com.rally.payment.domain.aggregate;
+package com.rally.payment.model;
 
 import com.rally.common.exceptions.domain.payment.InvalidPaymentStateException;
-import com.rally.payment.domain.aggregate.events.*;
-import com.rally.payment.domain.enums.PaymentStatus;
+import com.rally.payment.events.*;
+import com.rally.payment.enums.PaymentStatus;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import lombok.Builder;
 import lombok.Getter;
 import org.springframework.data.domain.AbstractAggregateRoot;
 

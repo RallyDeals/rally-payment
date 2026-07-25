@@ -1,4 +1,4 @@
-package com.rally.payment.domain.enums;
+package com.rally.payment.enums;
 
 public enum PaymentStatus {
     PENDING,           // payment_intent.created

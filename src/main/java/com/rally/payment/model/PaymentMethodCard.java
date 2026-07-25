@@ -1,4 +1,4 @@
-package com.rally.payment.domain.valueobject;
+package com.rally.payment.model;
 
 import jakarta.persistence.Embeddable;
 import lombok.AllArgsConstructor;
