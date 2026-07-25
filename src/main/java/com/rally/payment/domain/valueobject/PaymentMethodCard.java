@@ -1,0 +1,32 @@
+package com.rally.payment.domain.valueobject;
+
+import jakarta.persistence.Embeddable;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@Embeddable
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class PaymentMethodCard {
+
+    private String cardBrand;
+    private String cardLast4;
+    private String cardExpMonth;
+    private String cardExpYear;
+
+    public boolean isComplete() {
+        return cardBrand != null && cardLast4 != null
+            && cardExpMonth != null && cardExpYear != null;
+    }
+
+    public String getMaskedCard() {
+        if (cardLast4 == null) return "****";
+        return String.format("**** %s", cardLast4);
+    }
+}
