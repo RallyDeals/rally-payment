@@ -22,11 +22,21 @@ public class PaymentMethodService {
 
     @Transactional
     public PaymentMethodResponse createPaymentMethod(CreatePaymentMethodRequest request) {
+        if (request.isDefault()) {
+            paymentMethodRepository.findByUserId(request.userId()).stream()
+                .filter(PaymentMethod::isDefault)
+                .forEach(existing -> {
+                    existing.setDefault(false);
+                    paymentMethodRepository.save(existing);
+                });
+        }
+
         PaymentMethod paymentMethod = PaymentMethod.builder()
             .id(UUID.randomUUID())
             .userId(request.userId())
             .type(request.type())
             .token(request.token())
+            .isDefault(request.isDefault())
             .paymentMethodCard(PaymentMethodCard.builder()
                 .cardBrand(request.cardBrand())
                 .cardLast4(request.cardLast4())

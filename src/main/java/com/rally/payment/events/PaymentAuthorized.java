@@ -17,6 +17,6 @@ public record PaymentAuthorized(
 
     @Override
     public String eventType() {
-        return "PaymentAuthorized";
+        return "Payment.Authorized";
     }
 }

@@ -4,6 +4,7 @@ import com.rally.common.exceptions.domain.payment.InvalidPaymentStateException;
 import com.rally.payment.enums.PaymentStatus;
 import com.rally.payment.events.PaymentAuthorized;
 import com.rally.payment.events.PaymentCharged;
+import com.rally.payment.events.PaymentCaptured;
 import com.rally.payment.events.PaymentFailed;
 import com.rally.payment.events.PaymentInitialized;
 import com.rally.payment.events.PaymentRequiresAction;
@@ -54,11 +55,11 @@ public class Payment extends AbstractAggregateRoot<Payment> {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
-    @Column(name = "paid_at")
-    private Instant paidAt;
-
     @Column(name = "authorized_at")
     private Instant authorizedAt;
+
+    @Column(name = "paid_at")
+    private Instant paidAt;
 
     @Column(name = "failed_at")
     private Instant failedAt;
@@ -106,20 +107,24 @@ public class Payment extends AbstractAggregateRoot<Payment> {
     }
 
     public void charge(String paymentIntentId) {
-        if (status == PaymentStatus.SUCCEEDED) {
+        if (status == PaymentStatus.CHARGED) {
             return;
         }
 
-        status = PaymentStatus.SUCCEEDED;
+        if (status != PaymentStatus.PENDING && status != PaymentStatus.REQUIRES_ACTION) {
+            throw new InvalidPaymentStateException(this.id, this.status.toString(), "charge");
+        }
+
+        status = PaymentStatus.CHARGED;
         this.paymentIntentId = paymentIntentId;
         this.failureReason = null;
         this.paidAt = Instant.now();
 
-        registerEvent(new PaymentCharged(this.id, this.paymentIntentId, this.orderId, this.amount));
+        registerEvent(new PaymentCaptured(this.id, this.paymentIntentId, this.orderId, this.amount));
     }
 
     public void capture() {
-        if (status == PaymentStatus.SUCCEEDED) {
+        if (status == PaymentStatus.CAPTURED) {
             return;
         }
 
@@ -127,7 +132,7 @@ public class Payment extends AbstractAggregateRoot<Payment> {
             throw new IllegalStateException("This payment must be authorized before capture.");
         }
 
-        status = PaymentStatus.SUCCEEDED;
+        status = PaymentStatus.CAPTURED;
         this.paidAt = Instant.now();
 
         registerEvent(new PaymentCharged(this.id, this.paymentIntentId, this.orderId, this.amount));
@@ -138,7 +143,7 @@ public class Payment extends AbstractAggregateRoot<Payment> {
             return;
         }
 
-        if (status == PaymentStatus.SUCCEEDED) {
+        if (status == PaymentStatus.CHARGED || status == PaymentStatus.CAPTURED || status == PaymentStatus.VOIDED) {
             throw new InvalidPaymentStateException(this.id, this.status.toString(), "authorize");
         }
 
@@ -151,7 +156,7 @@ public class Payment extends AbstractAggregateRoot<Payment> {
     }
 
     public void fail(String reason, UUID paymentMethodId, String paymentIntentId) {
-        if (status == PaymentStatus.SUCCEEDED) {
+        if (status == PaymentStatus.CHARGED || status == PaymentStatus.CAPTURED || status == PaymentStatus.VOIDED) {
             throw new IllegalStateException("Cannot fail a completed payment.");
         }
 
@@ -165,11 +170,11 @@ public class Payment extends AbstractAggregateRoot<Payment> {
     }
 
     public void voidPayment(String reason) {
-        if (status == PaymentStatus.SUCCEEDED) {
+        if (status == PaymentStatus.CHARGED || status == PaymentStatus.CAPTURED) {
             throw new IllegalStateException("Cannot cancel a completed payment.");
         }
 
-        status = PaymentStatus.CANCELED;
+        status = PaymentStatus.VOIDED;
         this.voidedAt = Instant.now();
         this.failureReason = reason;
 
@@ -177,7 +182,7 @@ public class Payment extends AbstractAggregateRoot<Payment> {
     }
 
     public void requireAdditionalAction(UUID paymentMethodId, String paymentIntentId) {
-        if (status == PaymentStatus.SUCCEEDED) {
+        if (status == PaymentStatus.CHARGED || status == PaymentStatus.CAPTURED || status == PaymentStatus.VOIDED) {
             throw new IllegalStateException("Payment already succeeded.");
         }
 

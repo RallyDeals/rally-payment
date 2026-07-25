@@ -20,18 +20,4 @@ public class PaymentMethodCard {
     private String cardExpMonth;
     private String cardExpYear;
 
-    public boolean isComplete() {
-        return cardBrand != null
-            && cardLast4 != null
-            && cardExpMonth != null
-            && cardExpYear != null;
-    }
-
-    public String getMaskedCard() {
-        if (cardLast4 == null) {
-            return "****";
-        }
-
-        return String.format("**** %s", cardLast4);
-    }
 }

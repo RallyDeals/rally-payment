@@ -17,6 +17,6 @@ public record PaymentCharged(
 
     @Override
     public String eventType() {
-        return "PaymentCharged";
+        return "Payment.Charged";
     }
 }

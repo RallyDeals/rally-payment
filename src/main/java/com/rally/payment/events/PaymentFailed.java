@@ -16,6 +16,6 @@ public record PaymentFailed(
 
     @Override
     public String eventType() {
-        return "PaymentFailed";
+        return "Payment.Failed";
     }
 }

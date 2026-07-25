@@ -8,6 +8,7 @@ public record CreatePaymentMethodRequest(
     @NotNull UUID userId,
     @NotBlank String type,
     @NotBlank String token,
+    boolean isDefault,
     @NotBlank String cardBrand,
     @NotBlank String cardLast4,
     @NotBlank String cardExpMonth,

@@ -1,14 +1,11 @@
 package com.rally.payment.messaging.inbox;
 
-import com.rally.payment.enums.InboxMessageSource;
 import com.rally.payment.messaging.support.JsonMapAttributeConverter;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.PrePersist;
 import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.io.Serializable;
 import java.time.Instant;
@@ -32,6 +29,21 @@ public class InboxMessage implements Serializable {
     @Column(name = "message_id", nullable = false, updatable = false)
     private String messageId;
 
+    @Column(name = "topic", nullable = false, length = 100)
+    private String topic;
+
+    @Column(name = "message_type", nullable = false, length = 100)
+    private String messageType;
+
+    @Column(name = "correlation_id")
+    private java.util.UUID correlationId;
+
+    @Column(name = "causation_id")
+    private String causationId;
+
+    @Column(name = "trace_id", length = 64)
+    private String traceId;
+
     @Column(name = "payload", nullable = false, columnDefinition = "jsonb")
     private String payload;
 
@@ -43,12 +55,6 @@ public class InboxMessage implements Serializable {
     @Column(name = "status", nullable = false, length = 20)
     private String status = "RECEIVED";
 
-    @Column(name = "received_at", nullable = false, updatable = false)
-    private Instant receivedAt;
-
-    @Column(name = "processed_at")
-    private Instant processedAt;
-
     @Column(name = "retry_count", nullable = false)
     private int retryCount;
 
@@ -56,12 +62,14 @@ public class InboxMessage implements Serializable {
     @Column(name = "max_retries", nullable = false)
     private int maxRetries = 5;
 
+    @Column(name = "received_at", nullable = false, updatable = false)
+    private Instant receivedAt;
+
+    @Column(name = "processed_at")
+    private Instant processedAt;
+
     @Column(name = "last_error")
     private String lastError;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "source", nullable = false, length = 50)
-    private InboxMessageSource source;
 
     @PrePersist
     public void onCreate() {

@@ -37,6 +37,9 @@ public class PaymentMethod {
     @Column(name = "token", nullable = false, length = 500)
     private String token;
 
+    @Column(name = "is_default", nullable = false)
+    private boolean isDefault;
+
     @Embedded
     @AttributeOverrides({
         @AttributeOverride(name = "cardBrand", column = @Column(name = "card_brand")),

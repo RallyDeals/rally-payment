@@ -17,6 +17,6 @@ public record PaymentRefunded(
 
     @Override
     public String eventType() {
-        return "PaymentRefunded";
+        return "Payment.Refunded";
     }
 }

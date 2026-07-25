@@ -17,6 +17,6 @@ public record PaymentVoided(
 
     @Override
     public String eventType() {
-        return "PaymentVoided";
+        return "Payment.Voided";
     }
 }

@@ -15,6 +15,6 @@ public record PaymentRequiresAction(
 
     @Override
     public String eventType() {
-        return "PaymentRequiresAction";
+        return "Payment.RequiresAction";
     }
 }
