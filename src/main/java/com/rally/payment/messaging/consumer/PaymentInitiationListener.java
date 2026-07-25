@@ -6,6 +6,8 @@ import com.rally.payment.messaging.contract.PaymentMessageHeaders;
 import com.rally.payment.messaging.contract.PaymentMessageType;
 import com.rally.payment.messaging.inbox.InboxMessage;
 import com.rally.payment.repository.InboxJpaRepository;
+import com.rally.payment.service.PaymentService;
+import java.time.Instant;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,9 +29,11 @@ public class PaymentInitiationListener {
     private static final com.fasterxml.jackson.databind.ObjectMapper OBJECT_MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private final InboxJpaRepository inboxJpaRepository;
+    private final PaymentService paymentService;
 
-    public PaymentInitiationListener(InboxJpaRepository inboxJpaRepository) {
+    public PaymentInitiationListener(InboxJpaRepository inboxJpaRepository, PaymentService paymentService) {
         this.inboxJpaRepository = inboxJpaRepository;
+        this.paymentService = paymentService;
     }
 
     @Transactional
@@ -68,6 +72,12 @@ public class PaymentInitiationListener {
             .build();
 
         inboxJpaRepository.save(inboxMessage);
+        paymentService.createPaymentFromInitiation(payload);
+
+        inboxMessage.setStatus("PROCESSED");
+        inboxMessage.setProcessedAt(Instant.now());
+        inboxJpaRepository.save(inboxMessage);
+
         log.info("Stored payment initiation message {} from topic {}", messageId, record.topic());
     }
 

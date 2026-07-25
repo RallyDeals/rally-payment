@@ -5,6 +5,7 @@ import com.rally.payment.api.dto.CreatePaymentRequest;
 import com.rally.payment.api.dto.FailPaymentRequest;
 import com.rally.payment.api.dto.PaymentResponse;
 import com.rally.payment.api.dto.VoidPaymentRequest;
+import com.rally.payment.messaging.contract.PaymentInitiationRequested;
 import com.rally.payment.exception.PaymentNotFoundException;
 import com.rally.payment.model.Payment;
 import com.rally.payment.repository.PaymentJpaRepository;
@@ -24,6 +25,20 @@ public class PaymentService {
 
     @Transactional
     public PaymentResponse createPayment(CreatePaymentRequest request) {
+        Payment payment = Payment.initialize(
+            UUID.randomUUID(),
+            request.paymentMethodId(),
+            request.userId(),
+            request.orderId(),
+            request.amount()
+        );
+
+        return PaymentResponse.from(paymentRepository.save(payment));
+    }
+
+    @Transactional
+    public PaymentResponse createPaymentFromInitiation(PaymentInitiationRequested request) {
+
         Payment payment = Payment.initialize(
             UUID.randomUUID(),
             request.paymentMethodId(),
