@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+
+  broker:
+    image: apache/kafka-native:4.0.1-rc2
+    hostname: broker
+    container_name: broker
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:29093
+      KAFKA_LISTENERS: PLAINTEXT://broker:29092,CONTROLLER://broker:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    networks:
+      - rally-network
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local-payment-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: broker:29092
+    depends_on:
+      - broker
+    networks:
+      - rally-network
+
+  stripe-cli:
+    image: stripe/stripe-cli:v1.19.4
+    container_name: stripe-cli
+    volumes:
+      - ~/.config/stripe:/root/.config/stripe
+    command: listen --forward-to host.docker.internal:8082/api/v1/payments/webhook --api-key ${STRIPE_API_KEY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - rally-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: payment_postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - rally-network
+
+# Root Level Network & Volumes Definition
+networks:
+  rally-network:
+    driver: bridge
+
+volumes:
+  pgdata:

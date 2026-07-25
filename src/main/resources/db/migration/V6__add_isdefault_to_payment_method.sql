@@ -1,0 +1,2 @@
+ALTER TABLE payment_methods
+    ADD COLUMN is_default BOOLEAN NOT NULL DEFAULT FALSE;
