@@ -1,16 +1,15 @@
 package com.rally.payment.events;
 
-import java.io.Serializable;
 import java.time.Instant;
 import java.util.UUID;
 
 public record PaymentRequiresAction(
     UUID aggregateId,
     String paymentIntentId,
-    String orderId,
+    UUID orderId,
     Instant occurredAt
-) implements DomainEvent, Serializable {
-    public PaymentRequiresAction(UUID aggregateId, String paymentIntentId, String orderId) {
+) implements DomainEvent {
+    public PaymentRequiresAction(UUID aggregateId, String paymentIntentId, UUID orderId) {
         this(aggregateId, paymentIntentId, orderId, Instant.now());
     }
 

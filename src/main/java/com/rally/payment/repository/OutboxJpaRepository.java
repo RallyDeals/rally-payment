@@ -1,22 +1,17 @@
 package com.rally.payment.repository;
 
-import com.rally.payment.model.OutboxMessage;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
+import com.rally.payment.messaging.outbox.OutboxMessage;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
 
 @Repository
 public interface OutboxJpaRepository extends JpaRepository<OutboxMessage, UUID> {
 
-    @Query("SELECT o FROM OutboxEntity o WHERE o.status = 'PENDING' ORDER BY o.createdAt ASC")
-    List<OutboxMessage> findPendingByCreatedAtAsc(int batchSize);
+    List<OutboxMessage> findTop100ByStatusOrderByCreatedAtAsc(String status);
 
-    @Query("SELECT o FROM OutboxEntity o WHERE o.aggregateId = :aggregateId")
-    List<OutboxMessage> findByAggregateId(@Param("aggregateId") UUID aggregateId);
+    List<OutboxMessage> findByAggregateId(UUID aggregateId);
 
-    @Query("SELECT o FROM OutboxEntity o WHERE o.status = 'FAILED' AND o.retryCount < o.maxRetries")
-    List<OutboxMessage> findFailedWithRetries();
+    List<OutboxMessage> findByStatusAndRetryCountLessThan(String status, int retryCount);
 }

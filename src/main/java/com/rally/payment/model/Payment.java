@@ -1,49 +1,85 @@
 package com.rally.payment.model;
 
 import com.rally.common.exceptions.domain.payment.InvalidPaymentStateException;
-import com.rally.payment.events.*;
 import com.rally.payment.enums.PaymentStatus;
-
+import com.rally.payment.events.PaymentAuthorized;
+import com.rally.payment.events.PaymentCharged;
+import com.rally.payment.events.PaymentFailed;
+import com.rally.payment.events.PaymentInitialized;
+import com.rally.payment.events.PaymentRequiresAction;
+import com.rally.payment.events.PaymentVoided;
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import lombok.Getter;
-import org.springframework.data.domain.AbstractAggregateRoot;
-
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import org.springframework.data.domain.AbstractAggregateRoot;
 
 @Getter
+@Setter
 @Entity
 @Table(name = "payments")
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Payment extends AbstractAggregateRoot<Payment> {
 
     @Id
+    @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    private String orderId;
+    @Column(name = "order_id", nullable = false)
+    private UUID orderId;
+
+    @Column(name = "amount", nullable = false)
     private BigDecimal amount;
-    private String userId;
+
+    @Column(name = "user_id", nullable = false)
+    private UUID userId;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
     private PaymentStatus status;
 
+    @Column(name = "failure_reason")
     private String failureReason;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    @Column(name = "paid_at")
     private Instant paidAt;
+
+    @Column(name = "authorized_at")
     private Instant authorizedAt;
+
+    @Column(name = "failed_at")
     private Instant failedAt;
+
+    @Column(name = "voided_at")
     private Instant voidedAt;
+
+    @Column(name = "payment_method_id")
     private UUID paymentMethodId;
+
+    @Column(name = "payment_intent_id")
     private String paymentIntentId;
+
+    @Column(name = "stripe_customer_id")
     private String stripeCustomerId;
 
-    protected Payment() {}
+    @Version
+    @Column(name = "version")
+    private Long version;
 
-    public static Payment initialize(UUID id, UUID paymentMethodId, String userId, String orderId, BigDecimal amount) {
+    public static Payment initialize(UUID id, UUID paymentMethodId, UUID userId, UUID orderId, BigDecimal amount) {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Amount must be greater than zero.");
         }
@@ -58,7 +94,6 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         payment.createdAt = Instant.now();
 
         payment.registerEvent(new PaymentInitialized(id, orderId, amount));
-
         return payment;
     }
 
@@ -71,7 +106,9 @@ public class Payment extends AbstractAggregateRoot<Payment> {
     }
 
     public void charge(String paymentIntentId) {
-        if (status == PaymentStatus.SUCCEEDED) return;
+        if (status == PaymentStatus.SUCCEEDED) {
+            return;
+        }
 
         status = PaymentStatus.SUCCEEDED;
         this.paymentIntentId = paymentIntentId;
@@ -82,10 +119,12 @@ public class Payment extends AbstractAggregateRoot<Payment> {
     }
 
     public void capture() {
-        if (status == PaymentStatus.SUCCEEDED) return;
+        if (status == PaymentStatus.SUCCEEDED) {
+            return;
+        }
 
         if (status != PaymentStatus.AUTHORIZED) {
-            throw new IllegalStateException("This Payment must be authorized before capture.");
+            throw new IllegalStateException("This payment must be authorized before capture.");
         }
 
         status = PaymentStatus.SUCCEEDED;
@@ -95,10 +134,12 @@ public class Payment extends AbstractAggregateRoot<Payment> {
     }
 
     public void authorize(UUID paymentMethodId, String paymentIntentId) {
-        if (status == PaymentStatus.AUTHORIZED) return;
+        if (status == PaymentStatus.AUTHORIZED) {
+            return;
+        }
 
         if (status == PaymentStatus.SUCCEEDED) {
-            throw new InvalidPaymentStateException(this.id,this.status.toString(),"authorize");
+            throw new InvalidPaymentStateException(this.id, this.status.toString(), "authorize");
         }
 
         status = PaymentStatus.AUTHORIZED;
@@ -146,5 +187,4 @@ public class Payment extends AbstractAggregateRoot<Payment> {
 
         registerEvent(new PaymentRequiresAction(this.id, this.paymentIntentId, this.orderId));
     }
-
 }

@@ -1,17 +1,16 @@
 package com.rally.payment.events;
 
-import java.io.Serializable;
 import java.time.Instant;
 import java.util.UUID;
 
 public record PaymentFailed(
     UUID aggregateId,
     String paymentIntentId,
-    String orderId,
+    UUID orderId,
     String failureReason,
     Instant occurredAt
-) implements DomainEvent, Serializable {
-    public PaymentFailed(UUID aggregateId, String paymentIntentId, String orderId, String failureReason) {
+) implements DomainEvent {
+    public PaymentFailed(UUID aggregateId, String paymentIntentId, UUID orderId, String failureReason) {
         this(aggregateId, paymentIntentId, orderId, failureReason, Instant.now());
     }
 
