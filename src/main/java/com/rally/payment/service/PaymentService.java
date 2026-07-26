@@ -6,10 +6,18 @@ import com.rally.payment.api.dto.FailPaymentRequest;
 import com.rally.payment.api.dto.PaymentResponse;
 import com.rally.payment.api.dto.VoidPaymentRequest;
 import com.rally.payment.messaging.contract.PaymentInitiationRequested;
+import com.rally.payment.messaging.contract.PaymentMessageHeaders;
+import com.rally.payment.messaging.contract.PaymentMessageType;
 import com.rally.payment.exception.PaymentNotFoundException;
 import com.rally.payment.model.Payment;
+import com.rally.payment.messaging.outbox.OutboxMessage;
+import com.rally.payment.repository.OutboxJpaRepository;
 import com.rally.payment.repository.PaymentJpaRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,9 +26,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentService {
 
     private final PaymentJpaRepository paymentRepository;
+    private final OutboxJpaRepository outboxJpaRepository;
+    private static final com.fasterxml.jackson.databind.ObjectMapper OBJECT_MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
-    public PaymentService(PaymentJpaRepository paymentRepository) {
+    public PaymentService(
+        PaymentJpaRepository paymentRepository,
+        OutboxJpaRepository outboxJpaRepository
+    ) {
         this.paymentRepository = paymentRepository;
+        this.outboxJpaRepository = outboxJpaRepository;
+
     }
 
     @Transactional
@@ -38,7 +53,6 @@ public class PaymentService {
 
     @Transactional
     public PaymentResponse createPaymentFromInitiation(PaymentInitiationRequested request) {
-
         Payment payment = Payment.initialize(
             UUID.randomUUID(),
             request.paymentMethodId(),
@@ -47,7 +61,11 @@ public class PaymentService {
             request.amount()
         );
 
-        return PaymentResponse.from(paymentRepository.save(payment));
+        Payment savedPayment = paymentRepository.save(payment);
+
+        writeInitializationOutbox(savedPayment);
+
+        return PaymentResponse.from(savedPayment);
     }
 
     @Transactional(readOnly = true)
@@ -100,5 +118,41 @@ public class PaymentService {
     private Payment loadPayment(UUID paymentId) {
         return paymentRepository.findById(paymentId)
             .orElseThrow(() -> new PaymentNotFoundException(paymentId));
+    }
+
+    private void writeInitializationOutbox(Payment payment) {
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put(PaymentMessageHeaders.ID, UUID.randomUUID().toString());
+        headers.put(PaymentMessageHeaders.TYPE, PaymentMessageType.INITIALIZED.value());
+        headers.put(PaymentMessageHeaders.CORRELATION_ID, payment.getOrderId().toString());
+        headers.put(PaymentMessageHeaders.CAUSATION_ID, payment.getId().toString());
+        headers.put(PaymentMessageHeaders.TRACE_ID, payment.getId().toString());
+
+        OutboxMessage outboxMessage = OutboxMessage.builder()
+            .messageId(UUID.randomUUID())
+            .aggregateId(payment.getId())
+            .aggregateType("Payment")
+            .topic("payment.initialized")
+            .messageKey(payment.getOrderId().toString())
+            .messageType(PaymentMessageType.INITIALIZED.value())
+            .correlationId(payment.getOrderId())
+            .causationId(payment.getId().toString())
+            .traceId(payment.getId().toString())
+            .payload(toJsonNode(Map.of(
+                "paymentId", payment.getId(),
+                "orderId", payment.getOrderId(),
+                "userId", payment.getUserId(),
+                "amount", payment.getAmount(),
+                "status", payment.getStatus().name()
+            )))
+            .headers(toJsonNode(headers))
+            .status("PENDING")
+            .build();
+
+        outboxJpaRepository.save(outboxMessage);
+    }
+
+    private JsonNode toJsonNode(Object value) {
+        return OBJECT_MAPPER.valueToTree(value);
     }
 }
