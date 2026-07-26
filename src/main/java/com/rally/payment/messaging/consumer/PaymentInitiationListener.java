@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
@@ -54,11 +55,6 @@ public class PaymentInitiationListener {
             throw new IllegalArgumentException("Unsupported payment initiation flow: " + messageType);
         }
 
-        if (inboxJpaRepository.existsByMessageId(messageId)) {
-            log.info("Skipping duplicate payment initiation message {}", messageId);
-            return;
-        }
-
         InboxMessage inboxMessage = InboxMessage.builder()
             .messageId(messageId)
             .topic(record.topic())
@@ -71,7 +67,13 @@ public class PaymentInitiationListener {
             .status("RECEIVED")
             .build();
 
-        inboxJpaRepository.save(inboxMessage);
+        try {
+            inboxJpaRepository.save(inboxMessage);
+        } catch (DataIntegrityViolationException ex) {
+            log.info("Skipping duplicate payment initiation message {}", messageId);
+            return;
+        }
+
         paymentService.createPaymentFromInitiation(payload);
 
         inboxMessage.setStatus("PROCESSED");
