@@ -132,7 +132,7 @@ public class PaymentService {
             .messageId(UUID.randomUUID())
             .aggregateId(payment.getId())
             .aggregateType("Payment")
-            .topic("payment.initialized")
+            .topic("payment.events")
             .messageKey(payment.getOrderId().toString())
             .messageType(PaymentMessageType.INITIALIZED.value())
             .correlationId(payment.getOrderId())
