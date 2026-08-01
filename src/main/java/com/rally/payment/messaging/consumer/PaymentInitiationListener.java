@@ -26,7 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class PaymentInitiationListener {
 
-    private static final String DEFAULT_TOPIC = "order.payment_initiation_requested";
+    private static final String DEFAULT_TOPIC = "order.payments_requested";
     private static final com.fasterxml.jackson.databind.ObjectMapper OBJECT_MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private final InboxJpaRepository inboxJpaRepository;
