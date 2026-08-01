@@ -33,3 +33,12 @@ build/
 .vscode/
 
 .env
+
+rally-common/
+Spec-Kit Docs/
+.specify/
+.opencode/
+.claude/
+AGENTS.md
+specs/
+Rally-Payment-Service-Plan.md
