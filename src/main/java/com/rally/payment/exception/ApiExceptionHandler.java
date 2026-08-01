@@ -1,5 +1,6 @@
 package com.rally.payment.exception;
 
+import com.rally.common.exceptions.domain.payment.InvalidPaymentStateException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -17,6 +18,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(PaymentMethodNotFoundException.class)
     public ProblemDetail handlePaymentMethodNotFound(PaymentMethodNotFoundException exception) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, exception.getMessage());
+    }
+
+    @ExceptionHandler(InvalidPaymentStateException.class)
+    public ProblemDetail handleInvalidPaymentState(InvalidPaymentStateException exception) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, exception.getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
