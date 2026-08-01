@@ -29,6 +29,7 @@ public class PaymentMethodService {
                     existing.setDefault(false);
                     paymentMethodRepository.save(existing);
                 });
+            paymentMethodRepository.flush();
         }
 
         PaymentMethod paymentMethod = PaymentMethod.builder()
