@@ -1,20 +1,20 @@
 package com.rally.payment.messaging.inbox;
 
-import com.rally.payment.messaging.support.JsonMapAttributeConverter;
 import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.io.Serializable;
 import java.time.Instant;
-import java.util.Map;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "inbox_messages")
@@ -44,12 +44,13 @@ public class InboxMessage implements Serializable {
     @Column(name = "trace_id", length = 64)
     private String traceId;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "payload", nullable = false, columnDefinition = "jsonb")
-    private String payload;
+    private JsonNode payload;
 
-    @Convert(converter = JsonMapAttributeConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "headers", columnDefinition = "jsonb")
-    private Map<String, String> headers;
+    private JsonNode headers;
 
     @Builder.Default
     @Column(name = "status", nullable = false, length = 20)

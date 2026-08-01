@@ -2,13 +2,6 @@ package com.rally.payment.model;
 
 import com.rally.common.exceptions.domain.payment.InvalidPaymentStateException;
 import com.rally.payment.enums.PaymentStatus;
-import com.rally.payment.events.PaymentAuthorized;
-import com.rally.payment.events.PaymentCharged;
-import com.rally.payment.events.PaymentCaptured;
-import com.rally.payment.events.PaymentFailed;
-import com.rally.payment.events.PaymentInitialized;
-import com.rally.payment.events.PaymentRequiresAction;
-import com.rally.payment.events.PaymentVoided;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -23,14 +16,13 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.springframework.data.domain.AbstractAggregateRoot;
 
 @Getter
 @Setter
 @Entity
 @Table(name = "payments")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Payment extends AbstractAggregateRoot<Payment> {
+public class Payment {
 
     @Id
     @Column(name = "id", nullable = false, updatable = false)
@@ -97,7 +89,6 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         payment.status = PaymentStatus.PENDING;
         payment.createdAt = Instant.now();
 
-        payment.registerEvent(new PaymentInitialized(id, orderId, amount));
         return payment;
     }
 
@@ -122,8 +113,6 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         this.paymentIntentId = paymentIntentId;
         this.failureReason = null;
         this.chargedAt = Instant.now();
-
-        registerEvent(new PaymentCharged(this.id, this.paymentIntentId, this.orderId, this.amount));
     }
 
     public void capture() {
@@ -132,13 +121,11 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         }
 
         if (status != PaymentStatus.AUTHORIZED) {
-            throw new IllegalStateException("This payment must be authorized before capture.");
+            throw new InvalidPaymentStateException(this.id, this.status.toString(), "capture");
         }
 
         status = PaymentStatus.CAPTURED;
         this.capturedAt = Instant.now();
-
-        registerEvent(new PaymentCaptured(this.id, this.paymentIntentId, this.orderId, this.amount));
     }
 
     public void authorize(UUID paymentMethodId, String paymentIntentId) {
@@ -154,13 +141,11 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         this.paymentMethodId = paymentMethodId;
         this.paymentIntentId = paymentIntentId;
         this.authorizedAt = Instant.now();
-
-        registerEvent(new PaymentAuthorized(this.id, this.paymentIntentId, this.orderId, this.amount));
     }
 
     public void fail(String reason, UUID paymentMethodId, String paymentIntentId) {
         if (status == PaymentStatus.CHARGED || status == PaymentStatus.CAPTURED || status == PaymentStatus.VOIDED) {
-            throw new IllegalStateException("Cannot fail a completed payment.");
+            throw new InvalidPaymentStateException(this.id, this.status.toString(), "fail");
         }
 
         status = PaymentStatus.FAILED;
@@ -168,31 +153,25 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         this.paymentMethodId = paymentMethodId;
         this.paymentIntentId = paymentIntentId;
         this.failedAt = Instant.now();
-
-        registerEvent(new PaymentFailed(this.id, this.paymentIntentId, this.orderId, reason));
     }
 
     public void voidPayment(String reason) {
         if (status == PaymentStatus.CHARGED || status == PaymentStatus.CAPTURED) {
-            throw new IllegalStateException("Cannot cancel a completed payment.");
+            throw new InvalidPaymentStateException(this.id, this.status.toString(), "voidPayment");
         }
 
         status = PaymentStatus.VOIDED;
         this.voidedAt = Instant.now();
         this.failureReason = reason;
-
-        registerEvent(new PaymentVoided(this.id, this.paymentIntentId, this.orderId, this.amount));
     }
 
     public void requireAdditionalAction(UUID paymentMethodId, String paymentIntentId) {
         if (status == PaymentStatus.CHARGED || status == PaymentStatus.CAPTURED || status == PaymentStatus.VOIDED) {
-            throw new IllegalStateException("Payment already succeeded.");
+            throw new InvalidPaymentStateException(this.id, this.status.toString(), "requireAdditionalAction");
         }
 
         status = PaymentStatus.REQUIRES_ACTION;
         this.paymentMethodId = paymentMethodId;
         this.paymentIntentId = paymentIntentId;
-
-        registerEvent(new PaymentRequiresAction(this.id, this.paymentIntentId, this.orderId));
     }
 }
