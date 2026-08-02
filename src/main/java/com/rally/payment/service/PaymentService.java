@@ -98,9 +98,7 @@ public class PaymentService {
 
         switch (flow) {
             case INIT_REQUIRED_CHARGE -> initiateCharge(savedPayment);
-            case INIT_REQUIRED_AUTHORIZE -> throw new UnsupportedOperationException(
-                "Authorize flow is not yet supported by this service (incoming message " + flow + ")"
-            );
+            case INIT_REQUIRED_AUTHORIZE -> initiateAuthorization(savedPayment);
             default -> throw new IllegalArgumentException(
                 "Unexpected Payment.MessageType for initiation: " + flow
             );
@@ -110,52 +108,112 @@ public class PaymentService {
     }
 
     private void initiateCharge(Payment payment) {
-        PaymentMethod paymentMethod = paymentMethodRepository.findById(payment.getPaymentMethodId())
-            .orElseThrow(() -> new PaymentNotFoundException(payment.getPaymentMethodId()));
+        PaymentMethod paymentMethod = loadPaymentMethod(payment);
+        if (paymentMethod == null) {
+            return;
+        }
 
-        try {
-            PaymentIntent intent = stripeClient.paymentIntents().create(
-                buildPaymentIntentParams(payment, paymentMethod.getToken(), PaymentIntentCreateParams.CaptureMethod.AUTOMATIC)
-            );
+        PaymentIntent intent = createAndConfirmIntent(payment, paymentMethod, PaymentIntentCreateParams.CaptureMethod.AUTOMATIC);
+        if (intent == null) {
+            return;
+        }
 
-            log.info(
-                "Payment intent created for payment {}: intent {}, status {}",
-                payment.getId(), intent.getId(), intent.getStatus()
-            );
+        log.info(
+            "Payment intent created for payment {}: intent {}, status {}",
+            payment.getId(), intent.getId(), intent.getStatus()
+        );
 
-            switch (intent.getStatus()) {
-                case "succeeded" -> {
-                    payment.charge(intent.getId());
-                    writeOutcomeOutbox(payment, PaymentMessageType.CHARGED);
-                }
-                case "requires_action" -> {
-                    payment.fail("requires_action: 3DS-SCA not supported in v1", paymentMethod.getId(), intent.getId());
-                    writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
-                }
-                case "requires_payment_method" -> {
-                    String reason = intent.getLastPaymentError() != null
-                        ? intent.getLastPaymentError().getMessage()
-                        : "requires_payment_method";
-                    payment.fail(reason, paymentMethod.getId(), intent.getId());
-                    writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
-                }
-                default -> {
-                    payment.fail("Payment intent not succeeded: " + intent.getStatus(), paymentMethod.getId(), intent.getId());
-                    writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
-                }
+        switch (intent.getStatus()) {
+            case "succeeded" -> {
+                payment.charge(intent.getId());
+                writeOutcomeOutbox(payment, PaymentMessageType.CHARGED);
             }
+            case "requires_action" -> {
+                payment.fail("requires_action: 3DS-SCA not supported in v1", paymentMethod.getId(), intent.getId());
+                writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            }
+            case "requires_payment_method" -> {
+                payment.fail(intent.getLastPaymentError() != null
+                        ? intent.getLastPaymentError().getMessage()
+                        : "requires_payment_method",
+                    paymentMethod.getId(), intent.getId());
+                writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            }
+            default -> {
+                payment.fail("Payment intent not succeeded: " + intent.getStatus(), paymentMethod.getId(), intent.getId());
+                writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            }
+        }
+    }
+
+    private void initiateAuthorization(Payment payment) {
+        PaymentMethod paymentMethod = loadPaymentMethod(payment);
+        if (paymentMethod == null) {
+            return;
+        }
+
+        PaymentIntent intent = createAndConfirmIntent(payment, paymentMethod, PaymentIntentCreateParams.CaptureMethod.MANUAL);
+        if (intent == null) {
+            return;
+        }
+
+        log.info(
+            "Payment intent created for payment {}: intent {}, status {}",
+            payment.getId(), intent.getId(), intent.getStatus()
+        );
+
+        switch (intent.getStatus()) {
+            case "requires_capture" -> {
+                payment.authorize(payment.getPaymentMethodId(), intent.getId());
+                writeOutcomeOutbox(payment, PaymentMessageType.AUTHORIZED);
+            }
+            case "requires_action" -> {
+                payment.fail("requires_action: 3DS-SCA not supported in v1", paymentMethod.getId(), intent.getId());
+                writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            }
+            case "requires_payment_method" -> {
+                payment.fail(intent.getLastPaymentError() != null
+                        ? intent.getLastPaymentError().getMessage()
+                        : "requires_payment_method",
+                    paymentMethod.getId(), intent.getId());
+                writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            }
+            default -> {
+                payment.fail("Payment intent not succeeded: " + intent.getStatus(), paymentMethod.getId(), intent.getId());
+                writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            }
+        }
+    }
+
+    private PaymentMethod loadPaymentMethod(Payment payment) {
+        PaymentMethod paymentMethod = paymentMethodRepository.findById(payment.getPaymentMethodId()).orElse(null);
+        if (paymentMethod == null || paymentMethod.getToken() == null || paymentMethod.getToken().isBlank()) {
+            log.warn("Missing or blank payment method token for payment {}", payment.getId());
+            payment.fail("missing payment method", payment.getPaymentMethodId(), null);
+            writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            return null;
+        }
+        return paymentMethod;
+    }
+
+    private PaymentIntent createAndConfirmIntent(Payment payment, PaymentMethod paymentMethod, PaymentIntentCreateParams.CaptureMethod captureMethod) {
+        try {
+            return stripeClient.paymentIntents().create(
+                buildPaymentIntentParams(payment, paymentMethod.getToken(), captureMethod)
+            );
         } catch (CardException e) {
             String intentId = e.getStripeError() != null && e.getStripeError().getPaymentIntent() != null
                 ? e.getStripeError().getPaymentIntent().getId()
                 : null;
             payment.fail(e.getMessage(), paymentMethod.getId(), intentId);
             writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            return null;
         } catch (ApiConnectionException | RateLimitException | ApiException e) {
-            log.error("Stripe unavailable while charging payment {}", payment.getId(), e);
-            throw new ServiceUnavailableException("Stripe unavailable while charging payment " + payment.getId());
+            log.error("Stripe unavailable while creating payment intent for payment {}", payment.getId(), e);
+            throw new ServiceUnavailableException("Stripe unavailable while creating payment intent for payment " + payment.getId());
         } catch (StripeException e) {
-            log.error("Unexpected Stripe error while charging payment {}", payment.getId(), e);
-            throw new ServiceUnavailableException("Unexpected Stripe error while charging payment " + payment.getId());
+            log.error("Unexpected Stripe error while creating payment intent for payment {}", payment.getId(), e);
+            throw new ServiceUnavailableException("Unexpected Stripe error while creating payment intent for payment " + payment.getId());
         }
     }
 
