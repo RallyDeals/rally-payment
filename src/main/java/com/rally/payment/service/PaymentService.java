@@ -24,6 +24,7 @@ import com.stripe.StripeClient;
 import com.stripe.exception.ApiConnectionException;
 import com.stripe.exception.ApiException;
 import com.stripe.exception.CardException;
+import com.stripe.exception.InvalidRequestException;
 import com.stripe.exception.RateLimitException;
 import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
@@ -211,6 +212,11 @@ public class PaymentService {
         } catch (ApiConnectionException | RateLimitException | ApiException e) {
             log.error("Stripe unavailable while creating payment intent for payment {}", payment.getId(), e);
             throw new ServiceUnavailableException("Stripe unavailable while creating payment intent for payment " + payment.getId());
+        } catch (InvalidRequestException e) {
+            log.warn("Invalid Stripe request while creating payment intent for payment {}", payment.getId(), e);
+            payment.fail(e.getMessage(), paymentMethod.getId(), null);
+            writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            return null;
         } catch (StripeException e) {
             log.error("Unexpected Stripe error while creating payment intent for payment {}", payment.getId(), e);
             throw new ServiceUnavailableException("Unexpected Stripe error while creating payment intent for payment " + payment.getId());
