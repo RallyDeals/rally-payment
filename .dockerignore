@@ -1,0 +1,10 @@
+.git
+.gitignore
+target/
+.mvn/wrapper/maven-wrapper.jar
+.specify/
+specs/
+AGENTS.md
+*.log*
+.env*
+coverage/
