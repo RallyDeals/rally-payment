@@ -12,35 +12,54 @@ import com.rally.payment.messaging.contract.PaymentMessageHeaders;
 import com.rally.payment.messaging.contract.PaymentMessageType;
 import com.rally.payment.exception.PaymentNotFoundException;
 import com.rally.payment.model.Payment;
+import com.rally.payment.model.PaymentMethod;
 import com.rally.payment.messaging.outbox.OutboxMessage;
+import com.rally.common.exceptions.shared.ServiceUnavailableException;
 import com.rally.payment.repository.OutboxJpaRepository;
 import com.rally.payment.repository.PaymentJpaRepository;
+import com.rally.payment.repository.PaymentMethodJpaRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stripe.StripeClient;
+import com.stripe.exception.ApiConnectionException;
+import com.stripe.exception.ApiException;
+import com.stripe.exception.CardException;
+import com.stripe.exception.RateLimitException;
+import com.stripe.exception.StripeException;
+import com.stripe.model.PaymentIntent;
 import com.stripe.param.PaymentIntentCreateParams;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 public class PaymentService {
 
     private final PaymentJpaRepository paymentRepository;
     private final OutboxJpaRepository outboxJpaRepository;
+    private final PaymentMethodJpaRepository paymentMethodRepository;
+    private final StripeClient stripeClient;
     private final StripeProperties stripeProperties;
     private static final com.fasterxml.jackson.databind.ObjectMapper OBJECT_MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public PaymentService(
         PaymentJpaRepository paymentRepository,
         OutboxJpaRepository outboxJpaRepository,
+        PaymentMethodJpaRepository paymentMethodRepository,
+        StripeClient stripeClient,
         StripeProperties stripeProperties
     ) {
         this.paymentRepository = paymentRepository;
         this.outboxJpaRepository = outboxJpaRepository;
+        this.paymentMethodRepository = paymentMethodRepository;
+        this.stripeClient = stripeClient;
         this.stripeProperties = stripeProperties;
     }
 
@@ -58,7 +77,7 @@ public class PaymentService {
     }
 
     @Transactional
-    public PaymentResponse createPaymentFromInitiation(PaymentInitiationRequested request) {
+    public PaymentResponse createPaymentFromInitiation(PaymentInitiationRequested request, PaymentMessageType flow) {
         Payment payment = Payment.initialize(
             UUID.randomUUID(),
             request.paymentMethodId(),
@@ -67,11 +86,77 @@ public class PaymentService {
             request.amount()
         );
 
-        Payment savedPayment = paymentRepository.save(payment);
+        Payment savedPayment;
+        try {
+            savedPayment = paymentRepository.save(payment);
+        } catch (DataIntegrityViolationException e) {
+            log.info("Skipping payment initiation for order {}: order already has a payment", request.orderId());
+            return null;
+        }
 
         writeInitializationOutbox(savedPayment);
 
+        switch (flow) {
+            case INIT_REQUIRED_CHARGE -> initiateCharge(savedPayment);
+            case INIT_REQUIRED_AUTHORIZE -> throw new UnsupportedOperationException(
+                "Authorize flow is not yet supported by this service (incoming message " + flow + ")"
+            );
+            default -> throw new IllegalArgumentException(
+                "Unexpected Payment.MessageType for initiation: " + flow
+            );
+        }
+
         return PaymentResponse.from(savedPayment);
+    }
+
+    private void initiateCharge(Payment payment) {
+        PaymentMethod paymentMethod = paymentMethodRepository.findById(payment.getPaymentMethodId())
+            .orElseThrow(() -> new PaymentNotFoundException(payment.getPaymentMethodId()));
+
+        try {
+            PaymentIntent intent = stripeClient.paymentIntents().create(
+                buildPaymentIntentParams(payment, paymentMethod.getToken(), PaymentIntentCreateParams.CaptureMethod.AUTOMATIC)
+            );
+
+            log.info(
+                "Payment intent created for payment {}: intent {}, status {}",
+                payment.getId(), intent.getId(), intent.getStatus()
+            );
+
+            switch (intent.getStatus()) {
+                case "succeeded" -> {
+                    payment.charge(intent.getId());
+                    writeOutcomeOutbox(payment, PaymentMessageType.CHARGED);
+                }
+                case "requires_action" -> {
+                    payment.fail("requires_action: 3DS-SCA not supported in v1", paymentMethod.getId(), intent.getId());
+                    writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+                }
+                case "requires_payment_method" -> {
+                    String reason = intent.getLastPaymentError() != null
+                        ? intent.getLastPaymentError().getMessage()
+                        : "requires_payment_method";
+                    payment.fail(reason, paymentMethod.getId(), intent.getId());
+                    writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+                }
+                default -> {
+                    payment.fail("Payment intent not succeeded: " + intent.getStatus(), paymentMethod.getId(), intent.getId());
+                    writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+                }
+            }
+        } catch (CardException e) {
+            String intentId = e.getStripeError() != null && e.getStripeError().getPaymentIntent() != null
+                ? e.getStripeError().getPaymentIntent().getId()
+                : null;
+            payment.fail(e.getMessage(), paymentMethod.getId(), intentId);
+            writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+        } catch (ApiConnectionException | RateLimitException | ApiException e) {
+            log.error("Stripe unavailable while charging payment {}", payment.getId(), e);
+            throw new ServiceUnavailableException("Stripe unavailable while charging payment " + payment.getId());
+        } catch (StripeException e) {
+            log.error("Unexpected Stripe error while charging payment {}", payment.getId(), e);
+            throw new ServiceUnavailableException("Unexpected Stripe error while charging payment " + payment.getId());
+        }
     }
 
     @Transactional(readOnly = true)

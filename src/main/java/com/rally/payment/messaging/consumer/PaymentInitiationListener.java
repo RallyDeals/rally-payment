@@ -74,7 +74,7 @@ public class PaymentInitiationListener {
             return;
         }
 
-        paymentService.createPaymentFromInitiation(payload);
+        paymentService.createPaymentFromInitiation(payload, resolvedType);
 
         inboxMessage.setStatus("PROCESSED");
         inboxMessage.setProcessedAt(Instant.now());
