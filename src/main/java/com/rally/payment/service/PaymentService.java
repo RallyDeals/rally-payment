@@ -5,6 +5,8 @@ import com.rally.payment.api.dto.CreatePaymentRequest;
 import com.rally.payment.api.dto.FailPaymentRequest;
 import com.rally.payment.api.dto.PaymentResponse;
 import com.rally.payment.api.dto.VoidPaymentRequest;
+import com.rally.payment.config.StripeProperties;
+import com.rally.payment.stripe.StripeMetadata;
 import com.rally.payment.messaging.contract.PaymentInitiationRequested;
 import com.rally.payment.messaging.contract.PaymentMessageHeaders;
 import com.rally.payment.messaging.contract.PaymentMessageType;
@@ -15,6 +17,8 @@ import com.rally.payment.repository.OutboxJpaRepository;
 import com.rally.payment.repository.PaymentJpaRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stripe.param.PaymentIntentCreateParams;
+import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,15 +31,17 @@ public class PaymentService {
 
     private final PaymentJpaRepository paymentRepository;
     private final OutboxJpaRepository outboxJpaRepository;
+    private final StripeProperties stripeProperties;
     private static final com.fasterxml.jackson.databind.ObjectMapper OBJECT_MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public PaymentService(
         PaymentJpaRepository paymentRepository,
-        OutboxJpaRepository outboxJpaRepository
+        OutboxJpaRepository outboxJpaRepository,
+        StripeProperties stripeProperties
     ) {
         this.paymentRepository = paymentRepository;
         this.outboxJpaRepository = outboxJpaRepository;
-
+        this.stripeProperties = stripeProperties;
     }
 
     @Transactional
@@ -121,9 +127,28 @@ public class PaymentService {
     }
 
     private void writeInitializationOutbox(Payment payment) {
+        writeOutbox(payment, PaymentMessageType.INITIALIZED, Map.of(
+            "paymentId", payment.getId(),
+            "orderId", payment.getOrderId(),
+            "userId", payment.getUserId(),
+            "amount", payment.getAmount(),
+            "status", payment.getStatus().name()
+        ));
+    }
+
+    private void writeOutcomeOutbox(Payment payment, PaymentMessageType type) {
+        writeOutbox(payment, type, Map.of(
+            "paymentId", payment.getId(),
+            "orderId", payment.getOrderId(),
+            "paymentIntentId", payment.getPaymentIntentId(),
+            "amount", payment.getAmount()
+        ));
+    }
+
+    private void writeOutbox(Payment payment, PaymentMessageType type, Map<String, Object> payload) {
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put(PaymentMessageHeaders.ID, UUID.randomUUID().toString());
-        headers.put(PaymentMessageHeaders.TYPE, PaymentMessageType.INITIALIZED.value());
+        headers.put(PaymentMessageHeaders.TYPE, type.value());
         headers.put(PaymentMessageHeaders.CORRELATION_ID, payment.getOrderId().toString());
         headers.put(PaymentMessageHeaders.CAUSATION_ID, payment.getId().toString());
         headers.put(PaymentMessageHeaders.TRACE_ID, payment.getId().toString());
@@ -134,22 +159,29 @@ public class PaymentService {
             .aggregateType("Payment")
             .topic("payment.events")
             .messageKey(payment.getOrderId().toString())
-            .messageType(PaymentMessageType.INITIALIZED.value())
+            .messageType(type.value())
             .correlationId(payment.getOrderId())
             .causationId(payment.getId().toString())
             .traceId(payment.getId().toString())
-            .payload(toJsonNode(Map.of(
-                "paymentId", payment.getId(),
-                "orderId", payment.getOrderId(),
-                "userId", payment.getUserId(),
-                "amount", payment.getAmount(),
-                "status", payment.getStatus().name()
-            )))
+            .payload(toJsonNode(payload))
             .headers(toJsonNode(headers))
             .status("PENDING")
             .build();
 
         outboxJpaRepository.save(outboxMessage);
+    }
+
+    private PaymentIntentCreateParams buildPaymentIntentParams(Payment payment, String paymentMethodToken, PaymentIntentCreateParams.CaptureMethod captureMethod) {
+        return PaymentIntentCreateParams.builder()
+            .setAmount(payment.getAmount().multiply(BigDecimal.valueOf(100)).longValue())
+            .setCurrency(stripeProperties.getCurrency())
+            .setPaymentMethod(paymentMethodToken)
+            .setConfirm(true)
+            .setCaptureMethod(captureMethod)
+            .putMetadata(StripeMetadata.INTERNAL_PAYMENT_ID, payment.getId().toString())
+            .putMetadata(StripeMetadata.ORDER_ID, payment.getOrderId().toString())
+            .putMetadata(StripeMetadata.USER_ID, payment.getUserId().toString())
+            .build();
     }
 
     private JsonNode toJsonNode(Object value) {
