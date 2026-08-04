@@ -29,6 +29,7 @@ import com.stripe.exception.RateLimitException;
 import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
 import com.stripe.param.PaymentIntentCreateParams;
+import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,6 +49,7 @@ public class PaymentService {
     private final PaymentMethodJpaRepository paymentMethodRepository;
     private final StripeClient stripeClient;
     private final StripeProperties stripeProperties;
+    private final EntityManager entityManager;
     private static final com.fasterxml.jackson.databind.ObjectMapper OBJECT_MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public PaymentService(
@@ -55,13 +57,15 @@ public class PaymentService {
         OutboxJpaRepository outboxJpaRepository,
         PaymentMethodJpaRepository paymentMethodRepository,
         StripeClient stripeClient,
-        StripeProperties stripeProperties
+        StripeProperties stripeProperties,
+        EntityManager entityManager
     ) {
         this.paymentRepository = paymentRepository;
         this.outboxJpaRepository = outboxJpaRepository;
         this.paymentMethodRepository = paymentMethodRepository;
         this.stripeClient = stripeClient;
         this.stripeProperties = stripeProperties;
+        this.entityManager = entityManager;
     }
 
     @Transactional
@@ -87,11 +91,17 @@ public class PaymentService {
             request.amount()
         );
 
+        if (paymentRepository.findByOrderId(request.orderId()).isPresent()) {
+            log.info("Skipping payment initiation for order {}: order already has a payment", request.orderId());
+            return null;
+        }
+
         Payment savedPayment;
         try {
             savedPayment = paymentRepository.save(payment);
+            entityManager.flush();
         } catch (DataIntegrityViolationException e) {
-            log.info("Skipping payment initiation for order {}: order already has a payment", request.orderId());
+            log.info("Skipping payment initiation for order {} (concurrent): order already has a payment", request.orderId());
             return null;
         }
 
@@ -330,6 +340,14 @@ public class PaymentService {
             .putMetadata(StripeMetadata.INTERNAL_PAYMENT_ID, payment.getId().toString())
             .putMetadata(StripeMetadata.ORDER_ID, payment.getOrderId().toString())
             .putMetadata(StripeMetadata.USER_ID, payment.getUserId().toString())
+            .setAutomaticPaymentMethods(
+                    PaymentIntentCreateParams.AutomaticPaymentMethods.builder()
+                            .setEnabled(true)
+                            .setAllowRedirects(
+                                    PaymentIntentCreateParams.AutomaticPaymentMethods.AllowRedirects.NEVER
+                            )
+                            .build()
+            )
             .build();
     }
 
