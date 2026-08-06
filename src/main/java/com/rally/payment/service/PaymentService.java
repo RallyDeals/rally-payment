@@ -13,6 +13,8 @@ import com.rally.payment.messaging.inbox.InboxMessage;
 import com.rally.payment.messaging.contract.PaymentInitiationRequested;
 import com.rally.payment.messaging.contract.PaymentMessageHeaders;
 import com.rally.payment.messaging.contract.PaymentMessageType;
+import com.rally.payment.messaging.contract.PaymentSettlementRequested;
+import com.rally.payment.messaging.contract.PaymentTimeoutRequested;
 import com.rally.payment.model.Payment;
 import com.rally.payment.model.PaymentMethod;
 import com.rally.payment.messaging.outbox.OutboxMessage;
@@ -34,6 +36,8 @@ import com.stripe.exception.StripeException;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
 import com.stripe.net.Webhook;
+import com.stripe.param.PaymentIntentCancelParams;
+import com.stripe.param.PaymentIntentCaptureParams;
 import com.stripe.param.PaymentIntentCreateParams;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
@@ -127,6 +131,140 @@ public class PaymentService {
         }
 
         return PaymentResponse.from(savedPayment);
+    }
+
+    @Transactional
+    public void capturePaymentFromSettlement(PaymentSettlementRequested request) {
+        Payment payment = loadPaymentForSettlement(request.paymentId(), "capture");
+        if (payment == null) {
+            return;
+        }
+
+        PaymentIntent intent;
+        try {
+            intent = stripeClient.paymentIntents().capture(
+                payment.getPaymentIntentId(),
+                PaymentIntentCaptureParams.builder().build()
+            );
+        } catch (CardException e) {
+            log.warn("Card error while capturing payment intent for payment {}", payment.getId(), e);
+            payment.fail(e.getMessage(), payment.getPaymentMethodId(), payment.getPaymentIntentId());
+            writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            return;
+        } catch (ApiConnectionException | RateLimitException | ApiException e) {
+            log.error("Stripe unavailable while capturing payment intent for payment {}", payment.getId(), e);
+            throw new ServiceUnavailableException("Stripe unavailable while capturing payment intent for payment " + payment.getId());
+        } catch (InvalidRequestException e) {
+            log.warn("Invalid Stripe request while capturing payment intent for payment {}", payment.getId(), e);
+            payment.fail(e.getMessage(), payment.getPaymentMethodId(), payment.getPaymentIntentId());
+            writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            return;
+        } catch (StripeException e) {
+            log.error("Unexpected Stripe error while capturing payment intent for payment {}", payment.getId(), e);
+            throw new ServiceUnavailableException("Unexpected Stripe error while capturing payment intent for payment " + payment.getId());
+        }
+
+        if ("succeeded".equals(intent.getStatus())) {
+            payment.capture();
+            writeOutcomeOutbox(payment, PaymentMessageType.CAPTURED);
+        } else {
+            log.warn("Payment intent not succeeded for capture of payment {}: {}", payment.getId(), intent.getStatus());
+            payment.fail("Payment intent not succeeded: " + intent.getStatus(), payment.getPaymentMethodId(), payment.getPaymentIntentId());
+            writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+        }
+    }
+
+    @Transactional
+    public void voidPaymentFromSettlement(PaymentSettlementRequested request) {
+        Payment payment = loadPaymentForSettlement(request.paymentId(), "void");
+        if (payment == null) {
+            return;
+        }
+
+        if (releaseHeldFunds(payment, "void")) {
+            payment.voidPayment("void");
+            writeOutcomeOutbox(payment, PaymentMessageType.VOIDED);
+        }
+    }
+
+    @Transactional
+    public void resolveTimeout(PaymentTimeoutRequested request) {
+        Payment payment = paymentRepository.findByOrderId(request.orderId()).orElse(null);
+        if (payment == null) {
+            log.info("Skipping timeout resolution for order {}: no payment found", request.orderId());
+            return;
+        }
+
+        switch (payment.getStatus()) {
+            case PENDING -> {
+                payment.fail("timeout", payment.getPaymentMethodId(), payment.getPaymentIntentId());
+                writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            }
+            case AUTHORIZED -> {
+                if (releaseHeldFunds(payment, "timeout")) {
+                    payment.voidPayment("timeout");
+                    writeOutcomeOutbox(payment, PaymentMessageType.VOIDED);
+                }
+            }
+            case REQUIRES_ACTION -> {
+                payment.fail("timeout", payment.getPaymentMethodId(), payment.getPaymentIntentId());
+                writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            }
+            default -> log.info(
+                "Skipping timeout resolution for order {}: payment {} is already {}",
+                request.orderId(), payment.getId(), payment.getStatus()
+            );
+        }
+    }
+
+    private Payment loadPaymentForSettlement(UUID paymentId, String flow) {
+        Payment payment = paymentRepository.findById(paymentId).orElse(null);
+        if (payment == null) {
+            log.info("Skipping settlement {} for payment {}: payment not found", flow, paymentId);
+            return null;
+        }
+        if (payment.getStatus() != PaymentStatus.AUTHORIZED) {
+            log.info(
+                "Skipping settlement {} for payment {}: status is {}, expected AUTHORIZED",
+                flow, payment.getId(), payment.getStatus()
+            );
+            return null;
+        }
+        return payment;
+    }
+
+    private boolean releaseHeldFunds(Payment payment, String reason) {
+        PaymentIntent intent;
+        try {
+            intent = stripeClient.paymentIntents().cancel(
+                payment.getPaymentIntentId(),
+                PaymentIntentCancelParams.builder().build()
+            );
+        } catch (CardException e) {
+            log.warn("Card error while canceling payment intent for payment {}", payment.getId(), e);
+            payment.fail(e.getMessage(), payment.getPaymentMethodId(), payment.getPaymentIntentId());
+            writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            return false;
+        } catch (ApiConnectionException | RateLimitException | ApiException e) {
+            log.error("Stripe unavailable while canceling payment intent for payment {}", payment.getId(), e);
+            throw new ServiceUnavailableException("Stripe unavailable while canceling payment intent for payment " + payment.getId());
+        } catch (InvalidRequestException e) {
+            log.warn("Invalid Stripe request while canceling payment intent for payment {}", payment.getId(), e);
+            payment.fail(e.getMessage(), payment.getPaymentMethodId(), payment.getPaymentIntentId());
+            writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            return false;
+        } catch (StripeException e) {
+            log.error("Unexpected Stripe error while canceling payment intent for payment {}", payment.getId(), e);
+            throw new ServiceUnavailableException("Unexpected Stripe error while canceling payment intent for payment " + payment.getId());
+        }
+
+        if ("canceled".equals(intent.getStatus())) {
+            return true;
+        }
+        log.warn("Payment intent not canceled for payment {}: {}", payment.getId(), intent.getStatus());
+        payment.fail("Payment intent not canceled: " + intent.getStatus(), payment.getPaymentMethodId(), payment.getPaymentIntentId());
+        writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+        return false;
     }
 
     private void initiateCharge(Payment payment) {
@@ -437,12 +575,12 @@ public class PaymentService {
     }
 
     private void writeOutcomeOutbox(Payment payment, PaymentMessageType type) {
-        writeOutbox(payment, type, Map.of(
-            "paymentId", payment.getId(),
-            "orderId", payment.getOrderId(),
-            "paymentIntentId", payment.getPaymentIntentId(),
-            "amount", payment.getAmount()
-        ));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("paymentId", payment.getId());
+        payload.put("orderId", payment.getOrderId());
+        payload.put("paymentIntentId", payment.getPaymentIntentId());
+        payload.put("amount", payment.getAmount());
+        writeOutbox(payment, type, payload);
     }
 
     private void writeOutbox(Payment payment, PaymentMessageType type, Map<String, Object> payload) {

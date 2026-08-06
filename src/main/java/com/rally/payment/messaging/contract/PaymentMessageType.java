@@ -8,6 +8,7 @@ public enum PaymentMessageType {
     INIT_REQUIRED_AUTHORIZE("Payment.InitRequired.Authorize"),
     SETTLEMENT_REQUIRED_CAPTURE("Payment.SettlementRequired.Capture"),
     SETTLEMENT_REQUIRED_VOID("Payment.SettlementRequired.Void"),
+    TIMEOUT("Payment.Timeout"),
     AUTHORIZED("Payment.Authorized"),
     CHARGED("Payment.Charged"),
     CAPTURED("Payment.Captured"),
