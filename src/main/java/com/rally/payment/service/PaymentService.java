@@ -7,19 +7,23 @@ import com.rally.payment.api.dto.PaymentResponse;
 import com.rally.payment.api.dto.VoidPaymentRequest;
 import com.rally.payment.config.StripeProperties;
 import com.rally.payment.stripe.StripeMetadata;
+import com.rally.payment.exception.PaymentNotFoundException;
+import com.rally.payment.enums.PaymentStatus;
+import com.rally.payment.messaging.inbox.InboxMessage;
 import com.rally.payment.messaging.contract.PaymentInitiationRequested;
 import com.rally.payment.messaging.contract.PaymentMessageHeaders;
 import com.rally.payment.messaging.contract.PaymentMessageType;
-import com.rally.payment.exception.PaymentNotFoundException;
 import com.rally.payment.model.Payment;
 import com.rally.payment.model.PaymentMethod;
 import com.rally.payment.messaging.outbox.OutboxMessage;
 import com.rally.common.exceptions.shared.ServiceUnavailableException;
+import com.rally.payment.repository.InboxJpaRepository;
 import com.rally.payment.repository.OutboxJpaRepository;
 import com.rally.payment.repository.PaymentJpaRepository;
 import com.rally.payment.repository.PaymentMethodJpaRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rally.common.exceptions.domain.payment.InvalidPaymentStateException;
 import com.stripe.StripeClient;
 import com.stripe.exception.ApiConnectionException;
 import com.stripe.exception.ApiException;
@@ -27,13 +31,17 @@ import com.stripe.exception.CardException;
 import com.stripe.exception.InvalidRequestException;
 import com.stripe.exception.RateLimitException;
 import com.stripe.exception.StripeException;
+import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
+import com.stripe.net.Webhook;
 import com.stripe.param.PaymentIntentCreateParams;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -46,6 +54,7 @@ public class PaymentService {
 
     private final PaymentJpaRepository paymentRepository;
     private final OutboxJpaRepository outboxJpaRepository;
+    private final InboxJpaRepository inboxJpaRepository;
     private final PaymentMethodJpaRepository paymentMethodRepository;
     private final StripeClient stripeClient;
     private final StripeProperties stripeProperties;
@@ -55,6 +64,7 @@ public class PaymentService {
     public PaymentService(
         PaymentJpaRepository paymentRepository,
         OutboxJpaRepository outboxJpaRepository,
+        InboxJpaRepository inboxJpaRepository,
         PaymentMethodJpaRepository paymentMethodRepository,
         StripeClient stripeClient,
         StripeProperties stripeProperties,
@@ -62,6 +72,7 @@ public class PaymentService {
     ) {
         this.paymentRepository = paymentRepository;
         this.outboxJpaRepository = outboxJpaRepository;
+        this.inboxJpaRepository = inboxJpaRepository;
         this.paymentMethodRepository = paymentMethodRepository;
         this.stripeClient = stripeClient;
         this.stripeProperties = stripeProperties;
@@ -278,6 +289,136 @@ public class PaymentService {
         Payment payment = loadPayment(paymentId);
         payment.voidPayment(request.reason());
         return PaymentResponse.from(paymentRepository.save(payment));
+    }
+
+    public Event verifyStripeEvent(String payload, String signature) {
+        try {
+            return Webhook.constructEvent(payload, signature, stripeProperties.getWebhookSecret());
+        } catch (StripeException e) {
+            throw new IllegalArgumentException("Invalid Stripe webhook signature");
+        }
+    }
+
+    @Transactional
+    public void processStripeEvent(Event event) {
+        String messageId = event.getId();
+        String eventType = event.getType();
+
+        InboxMessage inboxMessage = InboxMessage.builder()
+            .messageId(messageId)
+            .topic("stripe.webhook")
+            .messageType(eventType)
+            .payload(OBJECT_MAPPER.valueToTree(event.getData().getObject()))
+            .status("RECEIVED")
+            .build();
+
+        try {
+            inboxJpaRepository.save(inboxMessage);
+        } catch (DataIntegrityViolationException ex) {
+            log.info("Skipping duplicate Stripe webhook {}", messageId);
+            return;
+        }
+
+        applyWebhookOutcome(event);
+
+        inboxMessage.setStatus("PROCESSED");
+        inboxMessage.setProcessedAt(Instant.now());
+        inboxJpaRepository.save(inboxMessage);
+    }
+
+    private void applyWebhookOutcome(Event event) {
+        String intentId = readIntentId(event);
+        if (intentId == null) {
+            log.info("Stripe webhook {} has no payment intent id; ignoring", event.getId());
+            return;
+        }
+
+        Optional<Payment> byIntent = paymentRepository.findByPaymentIntentId(intentId);
+        if (byIntent.isEmpty()) {
+            log.info("Stripe webhook {} references unknown payment intent {}; ignoring", event.getId(), intentId);
+            return;
+        }
+
+        Payment payment = byIntent.get();
+        switch (event.getType()) {
+            case "payment_intent.succeeded" -> applySucceeded(payment, intentId);
+            case "payment_intent.canceled" -> applyCanceled(payment);
+            case "payment_intent.payment_failed" -> {
+                String reason = readLastPaymentError(event);
+                applyFailed(payment, intentId, reason);
+            }
+            default -> log.info("Stripe webhook {} of type {} is not mapped; safe ignore", event.getId(), event.getType());
+        }
+    }
+
+    private String readIntentId(Event event) {
+        JsonNode object = readEventObject(event);
+        return object != null && object.has("id") ? object.path("id").asText(null) : null;
+    }
+
+    private String readLastPaymentError(Event event) {
+        JsonNode object = readEventObject(event);
+        if (object != null && object.hasNonNull("last_payment_error")) {
+            String message = object.path("last_payment_error").path("message").asText(null);
+            if (message != null) {
+                return message;
+            }
+        }
+        return "webhook: payment_intent.payment_failed";
+    }
+
+    private JsonNode readEventObject(Event event) {
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(event.toJson());
+            return root.path("data").path("object");
+        } catch (Exception e) {
+            log.warn("Could not read Stripe webhook data for event {}: {}", event.getId(), e.getMessage());
+            return null;
+        }
+    }
+
+    private void applySucceeded(Payment payment, String intentId) {
+        try {
+            if (payment.getStatus() == PaymentStatus.AUTHORIZED) {
+                payment.capture();
+                writeOutcomeOutbox(payment, PaymentMessageType.CAPTURED);
+            } else if (payment.getStatus() == PaymentStatus.PENDING
+                || payment.getStatus() == PaymentStatus.REQUIRES_ACTION) {
+                payment.charge(intentId);
+                writeOutcomeOutbox(payment, PaymentMessageType.CHARGED);
+            } else {
+                log.info("Webhook payment_intent.succeeded is a no-op for payment {} in state {}",
+                    payment.getId(), payment.getStatus());
+            }
+        } catch (InvalidPaymentStateException e) {
+            log.info("Webhook payment_intent.succeeded safely skipped for payment {}: {}", payment.getId(), e.getMessage());
+        }
+    }
+
+    private void applyCanceled(Payment payment) {
+        if (payment.getStatus() == PaymentStatus.VOIDED) {
+            log.info("Webhook payment_intent.canceled is a no-op for already-voided payment {}", payment.getId());
+            return;
+        }
+        try {
+            payment.voidPayment("webhook: payment_intent.canceled");
+            writeOutcomeOutbox(payment, PaymentMessageType.VOIDED);
+        } catch (InvalidPaymentStateException e) {
+            log.info("Webhook payment_intent.canceled safely skipped for payment {}: {}", payment.getId(), e.getMessage());
+        }
+    }
+
+    private void applyFailed(Payment payment, String intentId, String reason) {
+        if (payment.getStatus() == PaymentStatus.FAILED) {
+            log.info("Webhook payment_intent.payment_failed is a no-op for already-failed payment {}", payment.getId());
+            return;
+        }
+        try {
+            payment.fail(reason, payment.getPaymentMethodId(), intentId);
+            writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+        } catch (InvalidPaymentStateException e) {
+            log.info("Webhook payment_intent.payment_failed safely skipped for payment {}: {}", payment.getId(), e.getMessage());
+        }
     }
 
     private Payment loadPayment(UUID paymentId) {
