@@ -435,12 +435,12 @@ public class PaymentService {
     }
 
     private void writeOutcomeOutbox(Payment payment, PaymentMessageType type) {
-        writeOutbox(payment, type, Map.of(
-            "paymentId", payment.getId(),
-            "orderId", payment.getOrderId(),
-            "paymentIntentId", payment.getPaymentIntentId(),
-            "amount", payment.getAmount()
-        ));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("paymentId", payment.getId());
+        payload.put("orderId", payment.getOrderId());
+        payload.put("paymentIntentId", payment.getPaymentIntentId());
+        payload.put("amount", payment.getAmount());
+        writeOutbox(payment, type, payload);
     }
 
     private void writeOutbox(Payment payment, PaymentMessageType type, Map<String, Object> payload) {
