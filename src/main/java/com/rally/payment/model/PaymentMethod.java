@@ -40,6 +40,9 @@ public class PaymentMethod {
     @Column(name = "is_default", nullable = false)
     private boolean isDefault;
 
+    @Column(name = "card_fingerprint", length = 255)
+    private String cardFingerprint;
+
     @Embedded
     @AttributeOverrides({
         @AttributeOverride(name = "cardBrand", column = @Column(name = "card_brand")),

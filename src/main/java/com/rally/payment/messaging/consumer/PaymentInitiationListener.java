@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.rally.payment.messaging.contract.PaymentInitiationRequested;
 import com.rally.payment.messaging.contract.PaymentMessageHeaders;
 import com.rally.payment.messaging.contract.PaymentMessageType;
+import com.rally.payment.messaging.contract.PaymentSettlementRequested;
+import com.rally.payment.messaging.contract.PaymentTimeoutRequested;
 import com.rally.payment.messaging.inbox.InboxMessage;
 import com.rally.payment.repository.InboxJpaRepository;
 import com.rally.payment.service.PaymentService;
@@ -40,20 +42,16 @@ public class PaymentInitiationListener {
     @Transactional
     @KafkaListener(topics = DEFAULT_TOPIC)
     public void onMessage(
-        ConsumerRecord<String, PaymentInitiationRequested> record,
+        ConsumerRecord<String, JsonNode> record,
         @Header(PaymentMessageHeaders.ID) String messageId,
         @Header(PaymentMessageHeaders.TYPE) String messageType,
         @Header(value = PaymentMessageHeaders.CORRELATION_ID, required = false) String correlationId,
         @Header(value = PaymentMessageHeaders.CAUSATION_ID, required = false) String causationId,
         @Header(value = PaymentMessageHeaders.TRACE_ID, required = false) String traceId,
-        @Payload PaymentInitiationRequested payload
+        @Payload JsonNode payload
     ) {
         PaymentMessageType resolvedType = PaymentMessageType.fromValue(messageType)
-            .orElseThrow(() -> new IllegalArgumentException("Unsupported payment initiation message type: " + messageType));
-
-        if (resolvedType != PaymentMessageType.INIT_REQUIRED_CHARGE && resolvedType != PaymentMessageType.INIT_REQUIRED_AUTHORIZE) {
-            throw new IllegalArgumentException("Unsupported payment initiation flow: " + messageType);
-        }
+            .orElseThrow(() -> new IllegalArgumentException("Unsupported payment message type: " + messageType));
 
         InboxMessage inboxMessage = InboxMessage.builder()
             .messageId(messageId)
@@ -62,7 +60,7 @@ public class PaymentInitiationListener {
             .correlationId(parseUuid(correlationId))
             .causationId(causationId)
             .traceId(traceId)
-            .payload(toJsonNode(payload))
+            .payload(payload)
             .headers(toJsonNode(extractHeaders(record)))
             .status("RECEIVED")
             .build();
@@ -74,20 +72,42 @@ public class PaymentInitiationListener {
             return;
         }
 
-        paymentService.createPaymentFromInitiation(payload);
+        dispatch(resolvedType, payload);
 
         inboxMessage.setStatus("PROCESSED");
         inboxMessage.setProcessedAt(Instant.now());
         inboxJpaRepository.save(inboxMessage);
 
-        log.info("Stored payment initiation message {} from topic {}", messageId, record.topic());
+        log.info("Stored payment message {} of type {} from topic {}", messageId, messageType, record.topic());
+    }
+
+    private void dispatch(PaymentMessageType resolvedType, JsonNode payload) {
+        switch (resolvedType) {
+            case INIT_REQUIRED_CHARGE, INIT_REQUIRED_AUTHORIZE -> {
+                PaymentInitiationRequested requested = OBJECT_MAPPER.convertValue(payload, PaymentInitiationRequested.class);
+                paymentService.createPaymentFromInitiation(requested, resolvedType);
+            }
+            case SETTLEMENT_REQUIRED_CAPTURE -> {
+                PaymentSettlementRequested requested = OBJECT_MAPPER.convertValue(payload, PaymentSettlementRequested.class);
+                paymentService.capturePaymentFromSettlement(requested);
+            }
+            case SETTLEMENT_REQUIRED_VOID -> {
+                PaymentSettlementRequested requested = OBJECT_MAPPER.convertValue(payload, PaymentSettlementRequested.class);
+                paymentService.voidPaymentFromSettlement(requested);
+            }
+            case TIMEOUT -> {
+                PaymentTimeoutRequested requested = OBJECT_MAPPER.convertValue(payload, PaymentTimeoutRequested.class);
+                paymentService.resolveTimeout(requested);
+            }
+            default -> throw new IllegalArgumentException("Unsupported payment message type: " + resolvedType);
+        }
     }
 
     private JsonNode toJsonNode(Object value) {
         return OBJECT_MAPPER.valueToTree(value);
     }
 
-    private Map<String, String> extractHeaders(ConsumerRecord<String, PaymentInitiationRequested> record) {
+    private Map<String, String> extractHeaders(ConsumerRecord<String, JsonNode> record) {
         Map<String, String> headers = new LinkedHashMap<>();
         record.headers().forEach(header -> headers.put(header.key(), new String(header.value(), StandardCharsets.UTF_8)));
         headers.putIfAbsent(PaymentMessageHeaders.ID, record.key());
