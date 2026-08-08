@@ -51,7 +51,7 @@ services:
     networks:
       - rally-network
 
-  postgres:
+  payment_postgres:
     image: postgres:16-alpine
     container_name: payment_postgres
     environment:
@@ -61,7 +61,21 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata-payment:/var/lib/postgresql/data
+    networks:
+      - rally-network
+
+  order_postgres:
+    image: postgres:16-alpine
+    container_name: order_postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: order_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata-order:/var/lib/postgresql/data
     networks:
       - rally-network
 
@@ -71,4 +85,5 @@ networks:
     driver: bridge
 
 volumes:
-  pgdata:
+  pgdata-order:
+  pgdata-payment:

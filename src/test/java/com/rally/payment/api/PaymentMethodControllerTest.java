@@ -10,11 +10,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.rally.common.exceptions.shared.NotFoundException;
 import com.rally.payment.api.controller.PaymentMethodController;
 import com.rally.payment.api.dto.PaymentMethodListResponse;
 import com.rally.payment.api.dto.PaymentMethodResponse;
 import com.rally.payment.api.dto.SetupIntentResponse;
-import com.rally.payment.exception.PaymentMethodNotFoundException;
+
 import com.rally.payment.service.PaymentMethodService;
 import java.util.List;
 import java.util.UUID;
@@ -58,7 +59,7 @@ class PaymentMethodControllerTest {
     @Test
     void get_crossOwner_returns404() throws Exception {
         when(paymentMethodService.getForUser(userId, methodId))
-            .thenThrow(new PaymentMethodNotFoundException(methodId));
+            .thenThrow(new NotFoundException("PaymentMethod", methodId));
 
         mockMvc.perform(get("/api/users/{userId}/payment-methods/{methodId}", userId, methodId))
             .andExpect(status().isNotFound());

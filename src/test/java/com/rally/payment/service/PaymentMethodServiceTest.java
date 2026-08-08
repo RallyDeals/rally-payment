@@ -7,10 +7,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.rally.common.exceptions.shared.NotFoundException;
 import com.rally.payment.api.dto.CreatePaymentMethodRequest;
 import com.rally.payment.api.dto.PaymentMethodResponse;
 import com.rally.payment.api.dto.SetupIntentResponse;
-import com.rally.payment.exception.PaymentMethodNotFoundException;
+
 import com.rally.payment.model.PaymentMethod;
 import com.rally.payment.model.PaymentMethodCard;
 import com.rally.payment.repository.PaymentMethodJpaRepository;
@@ -189,7 +190,7 @@ class PaymentMethodServiceTest {
             .build();
         when(paymentMethodRepository.findById(methodId)).thenReturn(Optional.of(other));
 
-        assertThrows(PaymentMethodNotFoundException.class, () -> paymentMethodService.getForUser(requester, methodId));
+        assertThrows(NotFoundException.class, () -> paymentMethodService.getForUser(requester, methodId));
     }
 
     @Test

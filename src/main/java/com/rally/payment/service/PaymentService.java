@@ -8,7 +8,7 @@ import com.rally.payment.api.dto.VoidPaymentRequest;
 import com.rally.payment.config.StripeProperties;
 import com.rally.payment.model.PaymentMethodCard;
 import com.rally.payment.stripe.StripeMetadata;
-import com.rally.payment.exception.PaymentNotFoundException;
+import com.rally.common.exceptions.domain.payment.PaymentNotFoundException;
 import com.rally.payment.enums.PaymentStatus;
 import com.rally.payment.messaging.inbox.InboxMessage;
 import com.rally.payment.messaging.contract.PaymentInitiationRequested;
@@ -27,6 +27,8 @@ import com.rally.payment.repository.PaymentMethodJpaRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rally.common.exceptions.domain.payment.InvalidPaymentStateException;
+import com.rally.common.exceptions.shared.BadRequestException;
+import com.rally.common.exceptions.shared.ValidationException;
 import com.stripe.StripeClient;
 import com.stripe.exception.*;
 import com.stripe.model.Event;
@@ -181,7 +183,8 @@ public class PaymentService {
             return null;
         }
 
-        writeInitializationOutbox(savedPayment);
+        //// Payment.Initialized is intentionally not published: the order-payment contract does not map it.
+        // writeInitializationOutbox(savedPayment);
 
         switch (flow) {
             case INIT_REQUIRED_CHARGE -> initiateCharge(savedPayment);
@@ -209,11 +212,11 @@ public class PaymentService {
             );
         } catch (CardException e) {
             log.warn("Card error while capturing payment intent for payment {}", payment.getId(), e);
-            failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage());
+            failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage(), errorCodeOf(e));
             return;
         } catch (InvalidRequestException e) {
             log.warn("Invalid Stripe request while capturing payment intent for payment {}", payment.getId(), e);
-            failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage());
+            failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage(), errorCodeOf(e));
             return;
         } catch (ApiConnectionException | ApiException e) {
             log.error("Stripe unavailable while capturing payment intent for payment {}", payment.getId(), e);
@@ -280,7 +283,7 @@ public class PaymentService {
         try {
             return Webhook.constructEvent(payload, signature, stripeProperties.getWebhookSecret());
         } catch (StripeException e) {
-            throw new IllegalArgumentException("Invalid Stripe webhook signature");
+            throw new BadRequestException("Invalid Stripe webhook signature");
         }
     }
 
@@ -352,7 +355,7 @@ public class PaymentService {
 
         com.stripe.model.PaymentMethod.Card card = stripePaymentMethod.getCard();
         if (card == null) {
-            throw new IllegalArgumentException("Payment method is not a card.");
+            throw new ValidationException("Payment method is not a card.");
         }
 
 
@@ -435,7 +438,7 @@ public class PaymentService {
         }
         try {
             payment.fail(reason, payment.getPaymentMethodId(), intentId);
-            writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+            writeFailureOutbox(payment, reason, null);
         } catch (InvalidPaymentStateException e) {
             log.info("Webhook payment_intent.payment_failed safely skipped for payment {}: {}", payment.getId(), e.getMessage());
         }
@@ -560,11 +563,11 @@ public class PaymentService {
             String intentId = e.getStripeError() != null && e.getStripeError().getPaymentIntent() != null
                     ? e.getStripeError().getPaymentIntent().getId()
                     : null;
-            failPaymentAndPublish(payment, paymentMethod.getId(), intentId, e.getMessage());
+            failPaymentAndPublish(payment, paymentMethod.getId(), intentId, e.getMessage(), errorCodeOf(e));
             return null;
         } catch (InvalidRequestException e) {
             log.warn("Invalid Stripe request while creating payment intent for payment {}", payment.getId(), e);
-            failPaymentAndPublish(payment, paymentMethod.getId(), null, e.getMessage());
+            failPaymentAndPublish(payment, paymentMethod.getId(), null, e.getMessage(), errorCodeOf(e));
             return null;
         } catch (ApiConnectionException | ApiException e) {
             log.error("Stripe unavailable while creating payment intent for payment {}", payment.getId(), e);
@@ -584,11 +587,11 @@ public class PaymentService {
             );
         } catch (CardException e) {
             log.warn("Card error while canceling payment intent for payment {}", payment.getId(), e);
-            failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage());
+            failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage(), errorCodeOf(e));
             return false;
         } catch (InvalidRequestException e) {
             log.warn("Invalid Stripe request while canceling payment intent for payment {}", payment.getId(), e);
-            failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage());
+            failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage(), errorCodeOf(e));
             return false;
         } catch (ApiConnectionException | ApiException e) {
             log.error("Stripe unavailable while canceling payment intent for payment {}", payment.getId(), e);
@@ -636,8 +639,16 @@ public class PaymentService {
     // ~10 times. Centralizing it here doesn't change behavior - it just gives
     // the duplication one name and one place to change.
     private void failPaymentAndPublish(Payment payment, UUID paymentMethodId, String paymentIntentId, String reason) {
+        failPaymentAndPublish(payment, paymentMethodId, paymentIntentId, reason, null);
+    }
+
+    private void failPaymentAndPublish(Payment payment, UUID paymentMethodId, String paymentIntentId, String reason, String errorCode) {
         payment.fail(reason, paymentMethodId, paymentIntentId);
-        writeOutcomeOutbox(payment, PaymentMessageType.FAILED);
+        writeFailureOutbox(payment, reason, errorCode);
+    }
+
+    private String errorCodeOf(StripeException e) {
+        return e.getStripeError() != null ? e.getStripeError().getCode() : null;
     }
 
     private Payment loadPaymentOrThrow(UUID paymentId) {
@@ -676,6 +687,17 @@ public class PaymentService {
                 "amount", payment.getAmount(),
                 "status", payment.getStatus().name()
         ));
+    }
+
+    private void writeFailureOutbox(Payment payment, String errorMessage, String errorCode) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("paymentId", payment.getId());
+        payload.put("orderId", payment.getOrderId());
+        payload.put("paymentIntentId", payment.getPaymentIntentId());
+        payload.put("amount", payment.getAmount());
+        payload.put("errorMessage", errorMessage);
+        payload.put("errorCode", errorCode);
+        writeOutbox(payment, PaymentMessageType.FAILED, payload);
     }
 
     private void writeOutcomeOutbox(Payment payment, PaymentMessageType type) {
