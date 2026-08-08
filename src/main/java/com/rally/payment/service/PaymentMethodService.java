@@ -1,9 +1,10 @@
 package com.rally.payment.service;
 
+import com.rally.common.exceptions.shared.NotFoundException;
+import com.rally.common.exceptions.shared.ValidationException;
 import com.rally.payment.api.dto.CreatePaymentMethodRequest;
 import com.rally.payment.api.dto.PaymentMethodResponse;
 import com.rally.payment.api.dto.SetupIntentResponse;
-import com.rally.payment.exception.PaymentMethodNotFoundException;
 import com.rally.payment.model.PaymentMethod;
 import com.rally.payment.model.PaymentMethodCard;
 import com.rally.payment.repository.PaymentMethodJpaRepository;
@@ -47,7 +48,7 @@ public class PaymentMethodService {
     @Transactional
     public SetupIntentResponse startSetupIntent(UUID userId) {
         if (userId == null) {
-            throw new IllegalArgumentException("userId is required");
+            throw new ValidationException("userId is required");
         }
         SetupIntent setupIntent = stripeCardTokenService.createSetupIntent(userId);
         boolean requiresAction = "requires_action".equals(setupIntent.getStatus());
@@ -57,7 +58,7 @@ public class PaymentMethodService {
     @Transactional
     public PaymentMethodCreationResult confirmCreate(UUID userId, CreatePaymentMethodRequest request) {
         if (request == null || request.paymentMethodId() == null || request.paymentMethodId().isBlank()) {
-            throw new IllegalArgumentException("paymentMethodId is required");
+            throw new ValidationException("paymentMethodId is required");
         }
 
         com.stripe.model.PaymentMethod gatewayMethod =
@@ -65,7 +66,7 @@ public class PaymentMethodService {
         com.stripe.model.PaymentMethod.Card card = gatewayMethod.getCard();
         String fingerprint = card != null && card.getFingerprint() != null ? card.getFingerprint() : null;
         if (fingerprint == null || fingerprint.isBlank()) {
-            throw new IllegalArgumentException("paymentMethodId is not a confirmed card");
+            throw new ValidationException("paymentMethodId is not a confirmed card");
         }
 
         Optional<PaymentMethod> duplicate =
@@ -146,9 +147,9 @@ public class PaymentMethodService {
 
     private PaymentMethod loadOwnedMethod(UUID userId, UUID methodId) {
         PaymentMethod method = paymentMethodRepository.findById(methodId)
-            .orElseThrow(() -> new PaymentMethodNotFoundException(methodId));
+            .orElseThrow(() -> new NotFoundException("PaymentMethod", methodId));
         if (!method.getUserId().equals(userId)) {
-            throw new PaymentMethodNotFoundException(methodId);
+            throw new NotFoundException("PaymentMethod", methodId);
         }
         return method;
     }
