@@ -12,7 +12,8 @@ public record PaymentMethodResponse(
     String cardBrand,
     String cardLast4,
     String cardExpMonth,
-    String cardExpYear
+    String cardExpYear,
+    String cardFingerprint
 ) {
     public static PaymentMethodResponse from(PaymentMethod paymentMethod) {
         PaymentMethodCard card = paymentMethod.getPaymentMethodCard();
@@ -24,7 +25,8 @@ public record PaymentMethodResponse(
             card != null ? card.getCardBrand() : null,
             card != null ? card.getCardLast4() : null,
             card != null ? card.getCardExpMonth() : null,
-            card != null ? card.getCardExpYear() : null
+            card != null ? card.getCardExpYear() : null,
+            paymentMethod.getCardFingerprint()
         );
     }
 }

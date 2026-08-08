@@ -13,4 +13,8 @@ public interface PaymentMethodJpaRepository extends JpaRepository<PaymentMethod,
     Optional<PaymentMethod> findByToken(String token);
 
     List<PaymentMethod> findByUserId(UUID userId);
+
+    Optional<PaymentMethod> findByUserIdAndCardFingerprint(UUID userId, String cardFingerprint);
+
+    Optional<PaymentMethod> findByUserIdAndIsDefaultTrue(UUID userId);
 }
