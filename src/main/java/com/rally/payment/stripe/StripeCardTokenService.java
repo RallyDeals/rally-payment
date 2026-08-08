@@ -1,6 +1,7 @@
 package com.rally.payment.stripe;
 
 import com.rally.common.exceptions.shared.ServiceUnavailableException;
+import com.rally.common.exceptions.shared.ValidationException;
 import com.rally.payment.config.StripeProperties;
 import com.stripe.StripeClient;
 import com.stripe.exception.CardException;
@@ -47,7 +48,7 @@ public class StripeCardTokenService {
         try {
             return stripeClient.paymentMethods().retrieve(paymentMethodId);
         } catch (CardException | InvalidRequestException e) {
-            throw new IllegalArgumentException("paymentMethodId is not a confirmed card");
+            throw new ValidationException("paymentMethodId is not a confirmed card");
         } catch (StripeException e) {
             log.error("Stripe unavailable while retrieving payment method {}", paymentMethodId, e);
             throw new ServiceUnavailableException("Stripe unavailable while retrieving payment method " + paymentMethodId);
