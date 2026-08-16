@@ -1,4 +1,3 @@
--- Align payment identifiers with UUID-based service contracts and add optimistic locking
 
 ALTER TABLE payments
     ALTER COLUMN order_id TYPE UUID USING order_id::UUID,

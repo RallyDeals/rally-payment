@@ -1,4 +1,4 @@
--- Finalize inbox/outbox schema for broker-driven payment workflow
+
 
 ALTER TABLE inbox_messages
     ALTER COLUMN topic SET NOT NULL,
