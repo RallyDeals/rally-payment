@@ -1,6 +1,6 @@
 package com.rally.payment.api.controller;
 
-import com.rally.payment.service.PaymentService;
+import com.rally.payment.service.StripeWebhookService;
 import com.stripe.model.Event;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -11,19 +11,19 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class StripeWebhookController {
 
-    private final PaymentService paymentService;
+    private final StripeWebhookService stripeWebhookService;
 
-    public StripeWebhookController(PaymentService paymentService) {
-        this.paymentService = paymentService;
+    public StripeWebhookController(StripeWebhookService stripeWebhookService) {
+        this.stripeWebhookService = stripeWebhookService;
     }
 
-    @PostMapping("${stripe.webhook.path}")
+    @PostMapping("${stripe.webhook-path}")
     public ResponseEntity<Void> handleWebhook(
         @RequestBody String payload,
         @RequestHeader(value = "Stripe-Signature", required = false) String signature
     ) {
-        Event event = paymentService.verifyStripeEvent(payload, signature);
-        paymentService.processStripeEvent(event);
+        Event event = stripeWebhookService.verifyStripeEvent(payload, signature);
+        stripeWebhookService.processStripeEvent(event);
         return ResponseEntity.ok().build();
     }
 }
