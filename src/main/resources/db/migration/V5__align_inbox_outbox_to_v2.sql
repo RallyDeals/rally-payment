@@ -1,4 +1,3 @@
-
 ALTER TABLE outbox_messages
     RENAME COLUMN id TO message_id;
 

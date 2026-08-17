@@ -1,5 +1,3 @@
-
-
 ALTER TABLE inbox_messages
     ALTER COLUMN topic SET NOT NULL,
     ALTER COLUMN message_type SET NOT NULL;

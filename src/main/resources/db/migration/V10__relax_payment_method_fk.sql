@@ -1,4 +1,3 @@
-
 ALTER TABLE payments
     DROP CONSTRAINT fk_payments_payment_method;
 ALTER TABLE payments

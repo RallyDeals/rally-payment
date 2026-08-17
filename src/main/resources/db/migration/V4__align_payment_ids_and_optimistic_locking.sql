@@ -1,4 +1,3 @@
-
 ALTER TABLE payments
     ALTER COLUMN order_id TYPE UUID USING order_id::UUID,
     ALTER COLUMN user_id TYPE UUID USING user_id::UUID;

@@ -1,4 +1,3 @@
-
 CREATE TABLE inbox_messages (
     message_id VARCHAR(255) NOT NULL PRIMARY KEY,
     payload JSONB NOT NULL,
