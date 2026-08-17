@@ -8,7 +8,7 @@ import com.rally.payment.api.dto.SetupIntentResponse;
 import com.rally.payment.model.PaymentMethod;
 import com.rally.payment.model.PaymentMethodCard;
 import com.rally.payment.repository.PaymentMethodJpaRepository;
-import com.rally.payment.stripe.StripeCardTokenService;
+import com.rally.payment.stripe.StripePaymentGateway;
 import com.stripe.model.SetupIntent;
 import java.util.List;
 import java.util.Optional;
@@ -23,14 +23,14 @@ public class PaymentMethodService {
     }
 
     private final PaymentMethodJpaRepository paymentMethodRepository;
-    private final StripeCardTokenService stripeCardTokenService;
+    private final StripePaymentGateway stripePaymentGateway;
 
     public PaymentMethodService(
         PaymentMethodJpaRepository paymentMethodRepository,
-        StripeCardTokenService stripeCardTokenService
+        StripePaymentGateway stripePaymentGateway
     ) {
         this.paymentMethodRepository = paymentMethodRepository;
-        this.stripeCardTokenService = stripeCardTokenService;
+        this.stripePaymentGateway = stripePaymentGateway;
     }
 
     @Transactional(readOnly = true)
@@ -50,7 +50,7 @@ public class PaymentMethodService {
         if (userId == null) {
             throw new ValidationException("userId is required");
         }
-        SetupIntent setupIntent = stripeCardTokenService.createSetupIntent(userId);
+        SetupIntent setupIntent = stripePaymentGateway.createSetupIntent(userId);
         boolean requiresAction = "requires_action".equals(setupIntent.getStatus());
         return new SetupIntentResponse(setupIntent.getId(), setupIntent.getClientSecret(), requiresAction);
     }
@@ -62,7 +62,7 @@ public class PaymentMethodService {
         }
 
         com.stripe.model.PaymentMethod gatewayMethod =
-            stripeCardTokenService.retrieveCardDetails(request.paymentMethodId());
+            stripePaymentGateway.retrieveCardDetails(request.paymentMethodId());
         com.stripe.model.PaymentMethod.Card card = gatewayMethod.getCard();
         String fingerprint = card != null && card.getFingerprint() != null ? card.getFingerprint() : null;
         if (fingerprint == null || fingerprint.isBlank()) {
@@ -132,7 +132,7 @@ public class PaymentMethodService {
     @Transactional
     public void removeForUser(UUID userId, UUID methodId) {
         PaymentMethod method = loadOwnedMethod(userId, methodId);
-        stripeCardTokenService.detachMethod(method.getToken());
+        stripePaymentGateway.detachMethod(method.getToken());
         paymentMethodRepository.delete(method);
     }
 
