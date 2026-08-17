@@ -48,7 +48,7 @@ class PaymentMethodControllerTest {
     void list_wrapsItems_andNeverSerializesRawToken() throws Exception {
         when(paymentMethodService.listForUser(userId)).thenReturn(List.of(maskedMethod()));
 
-        mockMvc.perform(get("/api/users/{userId}/payment-methods", userId))
+        mockMvc.perform(get("/api/payment-methods").header("X-User-Id", userId))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.items").isArray())
             .andExpect(jsonPath("$.items[0].cardLast4").value("4242"))
@@ -61,7 +61,7 @@ class PaymentMethodControllerTest {
         when(paymentMethodService.getForUser(userId, methodId))
             .thenThrow(new NotFoundException("PaymentMethod", methodId));
 
-        mockMvc.perform(get("/api/users/{userId}/payment-methods/{methodId}", userId, methodId))
+        mockMvc.perform(get("/api/payment-methods/{methodId}", methodId).header("X-User-Id", userId))
             .andExpect(status().isNotFound());
     }
 
@@ -71,7 +71,8 @@ class PaymentMethodControllerTest {
             new PaymentMethodService.PaymentMethodCreationResult(maskedMethod(), true);
         when(paymentMethodService.confirmCreate(eq(userId), any())).thenReturn(duplicate);
 
-        mockMvc.perform(post("/api/users/{userId}/payment-methods", userId)
+        mockMvc.perform(post("/api/payment-methods")
+                .header("X-User-Id", userId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"paymentMethodId\":\"pm_dup\",\"isDefault\":false}"))
             .andExpect(status().isOk())
@@ -84,7 +85,8 @@ class PaymentMethodControllerTest {
             new PaymentMethodService.PaymentMethodCreationResult(maskedMethod(), false);
         when(paymentMethodService.confirmCreate(eq(userId), any())).thenReturn(created);
 
-        mockMvc.perform(post("/api/users/{userId}/payment-methods", userId)
+        mockMvc.perform(post("/api/payment-methods")
+                .header("X-User-Id", userId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"paymentMethodId\":\"pm_new\",\"isDefault\":true}"))
             .andExpect(status().isCreated())
@@ -96,7 +98,7 @@ class PaymentMethodControllerTest {
         when(paymentMethodService.startSetupIntent(userId))
             .thenReturn(new SetupIntentResponse("seti_1", "seti_1_secret_x", true));
 
-        mockMvc.perform(post("/api/users/{userId}/payment-methods/setup-intent", userId))
+        mockMvc.perform(post("/api/payment-methods/setup-intent").header("X-User-Id", userId))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.setupIntentId").value("seti_1"))
             .andExpect(jsonPath("$.clientSecret").value("seti_1_secret_x"))
@@ -107,7 +109,7 @@ class PaymentMethodControllerTest {
     void setDefault_returns200() throws Exception {
         when(paymentMethodService.setDefault(userId, methodId)).thenReturn(maskedMethod());
 
-        mockMvc.perform(put("/api/users/{userId}/payment-methods/{methodId}/default", userId, methodId))
+        mockMvc.perform(put("/api/payment-methods/{methodId}/default", methodId).header("X-User-Id", userId))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.isDefault").value(true));
     }
@@ -119,14 +121,14 @@ class PaymentMethodControllerTest {
         );
         when(paymentMethodService.clearDefault(userId, methodId)).thenReturn(cleared);
 
-        mockMvc.perform(delete("/api/users/{userId}/payment-methods/{methodId}/default", userId, methodId))
+        mockMvc.perform(delete("/api/payment-methods/{methodId}/default", methodId).header("X-User-Id", userId))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.isDefault").value(false));
     }
 
     @Test
     void remove_owned_returns204() throws Exception {
-        mockMvc.perform(delete("/api/users/{userId}/payment-methods/{methodId}", userId, methodId))
+        mockMvc.perform(delete("/api/payment-methods/{methodId}", methodId).header("X-User-Id", userId))
             .andExpect(status().isNoContent());
     }
 }
