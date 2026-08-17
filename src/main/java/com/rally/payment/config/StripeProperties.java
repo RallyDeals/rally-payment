@@ -12,6 +12,5 @@ public class StripeProperties {
     private String apiKey;
     private String webhookSecret;
     private String webhookPath;
-    private String customerId;
     private String currency = "usd";
 }

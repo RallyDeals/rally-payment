@@ -1,6 +1,3 @@
--- V3__inbox_table.sql
--- Transactional Inbox table for idempotent message consumption
-
 CREATE TABLE inbox_messages (
     message_id VARCHAR(255) NOT NULL PRIMARY KEY,
     payload JSONB NOT NULL,
@@ -14,11 +11,9 @@ CREATE TABLE inbox_messages (
     source VARCHAR(50) NOT NULL
 );
 
--- Index for finding unprocessed messages
-CREATE INDEX idx_inbox_status_received_at 
+CREATE INDEX idx_inbox_status_received_at
     ON inbox_messages (status, received_at);
 
--- Index for cleanup
-CREATE INDEX idx_inbox_processed_at 
+CREATE INDEX idx_inbox_processed_at
     ON inbox_messages (processed_at) 
     WHERE processed_at IS NOT NULL;

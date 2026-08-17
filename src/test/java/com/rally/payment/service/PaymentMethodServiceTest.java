@@ -15,7 +15,7 @@ import com.rally.payment.api.dto.SetupIntentResponse;
 import com.rally.payment.model.PaymentMethod;
 import com.rally.payment.model.PaymentMethodCard;
 import com.rally.payment.repository.PaymentMethodJpaRepository;
-import com.rally.payment.stripe.StripeCardTokenService;
+import com.rally.payment.stripe.StripePaymentGateway;
 import com.stripe.model.SetupIntent;
 import java.util.List;
 import java.util.Optional;
@@ -33,7 +33,7 @@ class PaymentMethodServiceTest {
     private PaymentMethodJpaRepository paymentMethodRepository;
 
     @Mock
-    private StripeCardTokenService stripeCardTokenService;
+    private StripePaymentGateway stripePaymentGateway;
 
     @InjectMocks
     private PaymentMethodService paymentMethodService;
@@ -56,7 +56,7 @@ class PaymentMethodServiceTest {
     void confirmCreate_newCard_savesMaskedMethodWithFingerprint() {
         UUID userId = UUID.randomUUID();
         com.stripe.model.PaymentMethod gatewayPm = confirmedCard("pm_new", "fp_abc");
-        when(stripeCardTokenService.retrieveCardDetails("pm_new")).thenReturn(gatewayPm);
+        when(stripePaymentGateway.retrieveCardDetails("pm_new")).thenReturn(gatewayPm);
         when(paymentMethodRepository.findByUserIdAndCardFingerprint(userId, "fp_abc")).thenReturn(Optional.empty());
         when(paymentMethodRepository.save(any(PaymentMethod.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
@@ -89,7 +89,7 @@ class PaymentMethodServiceTest {
                 .cardExpYear("28")
                 .build())
             .build();
-        when(stripeCardTokenService.retrieveCardDetails("pm_dup")).thenReturn(confirmedCard("pm_dup", "fp_abc"));
+        when(stripePaymentGateway.retrieveCardDetails("pm_dup")).thenReturn(confirmedCard("pm_dup", "fp_abc"));
         when(paymentMethodRepository.findByUserIdAndCardFingerprint(userId, "fp_abc"))
             .thenReturn(Optional.of(existing));
 
@@ -112,7 +112,7 @@ class PaymentMethodServiceTest {
             .isDefault(true)
             .cardFingerprint("fp_old")
             .build();
-        when(stripeCardTokenService.retrieveCardDetails("pm_new")).thenReturn(confirmedCard("pm_new", "fp_abc"));
+        when(stripePaymentGateway.retrieveCardDetails("pm_new")).thenReturn(confirmedCard("pm_new", "fp_abc"));
         when(paymentMethodRepository.findByUserIdAndCardFingerprint(userId, "fp_abc")).thenReturn(Optional.empty());
         when(paymentMethodRepository.findByUserIdAndIsDefaultTrue(userId)).thenReturn(Optional.of(previousDefault));
         when(paymentMethodRepository.save(any(PaymentMethod.class)))
@@ -132,7 +132,7 @@ class PaymentMethodServiceTest {
         setupIntent.setId("seti_1");
         setupIntent.setClientSecret("seti_1_secret_x");
         setupIntent.setStatus("requires_action");
-        when(stripeCardTokenService.createSetupIntent(userId)).thenReturn(setupIntent);
+        when(stripePaymentGateway.createSetupIntent(userId)).thenReturn(setupIntent);
 
         SetupIntentResponse response = paymentMethodService.startSetupIntent(userId);
 
@@ -149,7 +149,7 @@ class PaymentMethodServiceTest {
         setupIntent.setId("seti_2");
         setupIntent.setClientSecret("seti_2_secret_y");
         setupIntent.setStatus("succeeded");
-        when(stripeCardTokenService.createSetupIntent(userId)).thenReturn(setupIntent);
+        when(stripePaymentGateway.createSetupIntent(userId)).thenReturn(setupIntent);
 
         SetupIntentResponse response = paymentMethodService.startSetupIntent(userId);
 
@@ -207,7 +207,7 @@ class PaymentMethodServiceTest {
 
         paymentMethodService.removeForUser(userId, methodId);
 
-        verify(stripeCardTokenService).detachMethod("pm_owned");
+        verify(stripePaymentGateway).detachMethod("pm_owned");
         verify(paymentMethodRepository).delete(owned);
     }
 

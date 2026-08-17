@@ -1,7 +1,3 @@
--- V1__initial_schema.sql
--- Initial schema for Payment Service
-
--- Payment Methods table
 CREATE TABLE payment_methods (
     id UUID NOT NULL PRIMARY KEY,
     user_id UUID NOT NULL,
@@ -13,7 +9,6 @@ CREATE TABLE payment_methods (
     card_exp_year VARCHAR(4)
 );
 
--- Payments table
 CREATE TABLE payments (
     id UUID NOT NULL PRIMARY KEY,
     order_id VARCHAR(255) NOT NULL,
@@ -35,21 +30,9 @@ CREATE TABLE payments (
         ON DELETE CASCADE
 );
 
--- Indexes for payments
--- Search by payment method id
 CREATE INDEX idx_payments_payment_method_id ON payments (payment_method_id);
--- Search by order id
 CREATE INDEX idx_payments_order_id ON payments (order_id);
-
--- Search by user id
 CREATE INDEX idx_payments_user_id ON payments (user_id);
-
--- Search by status (useful for reports)
 CREATE INDEX idx_payments_status ON payments (status);
-
--- Search by payment intent (Stripe payment id)
 CREATE INDEX idx_payments_payment_intent_id ON payments (payment_intent_id);
-
--- Search for user's saved payment methods
--- Indexes for payment_methods
 CREATE INDEX idx_payment_methods_user_id ON payment_methods (user_id);

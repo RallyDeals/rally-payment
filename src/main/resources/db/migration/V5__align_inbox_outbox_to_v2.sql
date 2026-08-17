@@ -1,5 +1,3 @@
--- Align inbox/outbox tables with payment-service-details-v2 contract
-
 ALTER TABLE outbox_messages
     RENAME COLUMN id TO message_id;
 

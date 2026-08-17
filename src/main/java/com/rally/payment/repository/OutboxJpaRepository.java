@@ -1,6 +1,7 @@
 package com.rally.payment.repository;
 
 import com.rally.payment.messaging.outbox.OutboxMessage;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -16,6 +17,10 @@ public interface OutboxJpaRepository extends JpaRepository<OutboxMessage, UUID> 
     List<OutboxMessage> findByAggregateId(UUID aggregateId);
 
     List<OutboxMessage> findByStatusAndRetryCountLessThan(String status, int retryCount);
+
+    long countByStatus(String status);
+
+    long countByStatusAndCreatedAtBefore(String status, Instant before);
 
     @Query(value = "SELECT * FROM outbox_messages "
         + "WHERE status = 'PENDING' AND retry_count < max_retries "

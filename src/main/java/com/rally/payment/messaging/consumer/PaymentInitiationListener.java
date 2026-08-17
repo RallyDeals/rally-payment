@@ -7,6 +7,7 @@ import com.rally.payment.messaging.contract.PaymentMessageType;
 import com.rally.payment.messaging.contract.PaymentSettlementRequested;
 import com.rally.payment.messaging.contract.PaymentTimeoutRequested;
 import com.rally.payment.messaging.inbox.InboxMessage;
+import com.rally.payment.metrics.PaymentMetrics;
 import com.rally.payment.repository.InboxJpaRepository;
 import com.rally.payment.service.PaymentService;
 import java.time.Instant;
@@ -33,10 +34,12 @@ public class PaymentInitiationListener {
 
     private final InboxJpaRepository inboxJpaRepository;
     private final PaymentService paymentService;
+    private final PaymentMetrics metrics;
 
-    public PaymentInitiationListener(InboxJpaRepository inboxJpaRepository, PaymentService paymentService) {
+    public PaymentInitiationListener(InboxJpaRepository inboxJpaRepository, PaymentService paymentService, PaymentMetrics metrics) {
         this.inboxJpaRepository = inboxJpaRepository;
         this.paymentService = paymentService;
+        this.metrics = metrics;
     }
 
     @Transactional
@@ -52,6 +55,9 @@ public class PaymentInitiationListener {
     ) {
         PaymentMessageType resolvedType = PaymentMessageType.fromValue(messageType)
             .orElseThrow(() -> new IllegalArgumentException("Unsupported payment message type: " + messageType));
+
+        log.info("Kafka message consumed: messageId={}, type={}, topic={}, partition={}, offset={}",
+                messageId, messageType, record.topic(), record.partition(), record.offset());
 
         InboxMessage inboxMessage = InboxMessage.builder()
             .messageId(messageId)
@@ -72,13 +78,20 @@ public class PaymentInitiationListener {
             return;
         }
 
-        dispatch(resolvedType, payload);
+        metrics.recordKafkaEventProcessed(messageType);
+        try {
+            dispatch(resolvedType, payload);
+        } catch (Exception e) {
+            log.error("Kafka message processing failed: messageId={}, type={}, topic={}",
+                    messageId, messageType, record.topic(), e);
+            throw e;
+        }
 
         inboxMessage.setStatus("PROCESSED");
         inboxMessage.setProcessedAt(Instant.now());
         inboxJpaRepository.save(inboxMessage);
 
-        log.info("Stored payment message {} of type {} from topic {}", messageId, messageType, record.topic());
+        log.info("Kafka message processed: messageId={}, type={}, topic={}", messageId, messageType, record.topic());
     }
 
     private void dispatch(PaymentMessageType resolvedType, JsonNode payload) {

@@ -12,4 +12,6 @@ public class OutboxRelayProperties {
     private long pollIntervalMs = 1000;
 
     private int batchSize = 100;
+
+    private long healthStaleMs = 5 * 60 * 1000;
 }

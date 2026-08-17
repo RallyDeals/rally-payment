@@ -5,15 +5,15 @@ import com.rally.payment.model.PaymentMethodCard;
 import java.util.UUID;
 
 public record PaymentMethodResponse(
-    UUID id,
-    UUID userId,
-    String type,
-    boolean isDefault,
-    String cardBrand,
-    String cardLast4,
-    String cardExpMonth,
-    String cardExpYear,
-    String cardFingerprint
+        UUID id,
+        UUID userId,
+        String type,
+        boolean isDefault,
+        String cardBrand,
+        String cardLast4,
+        String cardExpMonth,
+        String cardExpYear,
+        String cardFingerprint
 ) {
     public static PaymentMethodResponse from(PaymentMethod paymentMethod) {
         PaymentMethodCard card = paymentMethod.getPaymentMethodCard();
