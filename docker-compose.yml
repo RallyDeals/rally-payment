@@ -45,7 +45,7 @@ services:
     container_name: stripe-cli
     volumes:
       - ~/.config/stripe:/root/.config/stripe
-    command: listen --forward-to host.docker.internal:8082/api/v1/payments/webhook --api-key ${STRIPE_API_KEY}
+    command: listen --forward-to host.docker.internal:${SERVER_PORT:-8089}${STRIPE_WEBHOOK_PATH:-/api/v1/payments/webhook} --api-key ${STRIPE_API_KEY}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -65,25 +65,9 @@ services:
     networks:
       - rally-network
 
-  order_postgres:
-    image: postgres:16-alpine
-    container_name: order_postgres
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: order_db
-    ports:
-      - "5434:5432"
-    volumes:
-      - pgdata-order:/var/lib/postgresql/data
-    networks:
-      - rally-network
-
-# Root Level Network & Volumes Definition
 networks:
   rally-network:
     driver: bridge
 
 volumes:
-  pgdata-order:
   pgdata-payment:
