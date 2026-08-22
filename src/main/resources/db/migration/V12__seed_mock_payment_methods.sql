@@ -34,8 +34,8 @@ VALUES
     -- User 1: Visa
     ('c21f969b-5779-4328-82d1-935104d49d94',
      '4dc618d7-290b-4eee-8cb5-6115e6085b6b',
-     'CARD', 'pm_1U6sBY0uquxxwDMn1iglr7pf', TRUE,
-     'Visa', '4242', '12', '2028',
+     'CARD', 'pm_1U70vP0uquxxwDMnuBy27n0g', TRUE,
+     'Visa', '4242', '12', '2029',
      'y9gJAW5rl4ecYQuX', 0),
 
     -- User 2: Mastercard (from screenshot)
