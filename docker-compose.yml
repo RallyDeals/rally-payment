@@ -45,7 +45,7 @@ services:
     container_name: stripe-cli
     volumes:
       - ~/.config/stripe:/root/.config/stripe
-    command: listen --forward-to host.docker.internal:${SERVER_PORT:-8089}${STRIPE_WEBHOOK_PATH:-/api/v1/payments/webhook} --api-key ${STRIPE_API_KEY}
+    command: listen --forward-to host.docker.internal:${SERVER_PORT:-8091}${STRIPE_WEBHOOK_PATH:-/api/v1/payments/webhook} --api-key ${STRIPE_API_KEY}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
