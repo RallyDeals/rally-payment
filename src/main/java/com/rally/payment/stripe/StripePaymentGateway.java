@@ -3,6 +3,7 @@ package com.rally.payment.stripe;
 import com.rally.common.exceptions.shared.ServiceUnavailableException;
 import com.rally.common.exceptions.shared.ValidationException;
 import com.rally.payment.config.StripeProperties;
+import com.rally.payment.messaging.contract.PaymentMessageHeaders;
 import com.rally.payment.model.Payment;
 import com.rally.payment.service.PaymentProfileService;
 import com.stripe.StripeClient;
@@ -21,8 +22,13 @@ import com.stripe.param.PaymentMethodDetachParams;
 import com.stripe.param.SetupIntentCreateParams;
 import java.math.BigDecimal;
 import java.util.UUID;
+
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Component
@@ -31,15 +37,18 @@ public class StripePaymentGateway {
     private final StripeClient stripeClient;
     private final StripeProperties stripeProperties;
     private final PaymentProfileService paymentProfileService;
+    private final Tracer tracer;
 
     public StripePaymentGateway(
             StripeClient stripeClient,
             StripeProperties stripeProperties,
-            PaymentProfileService paymentProfileService
+            PaymentProfileService paymentProfileService,
+            Tracer tracer
     ) {
         this.stripeClient = stripeClient;
         this.stripeProperties = stripeProperties;
         this.paymentProfileService = paymentProfileService;
+        this.tracer = tracer;
     }
 
     public PaymentIntent createAndConfirm(Payment payment, String paymentMethodToken, PaymentIntentCreateParams.CaptureMethod captureMethod) throws CardException, InvalidRequestException {
@@ -103,6 +112,8 @@ public class StripePaymentGateway {
                 .putMetadata(StripeMetadata.INTERNAL_PAYMENT_ID, payment.getId().toString())
                 .putMetadata(StripeMetadata.ORDER_ID, payment.getOrderId().toString())
                 .putMetadata(StripeMetadata.USER_ID, payment.getUserId().toString())
+                .putMetadata(StripeMetadata.CORRELATION_ID, MDC.get(PaymentMessageHeaders.CORRELATION_ID))
+                .putMetadata(StripeMetadata.TRACE_ID, currentTraceId())
                 .setAutomaticPaymentMethods(
                         PaymentIntentCreateParams.AutomaticPaymentMethods.builder()
                                 .setEnabled(true)
@@ -130,6 +141,8 @@ public class StripePaymentGateway {
                         .setAllowRedirects(SetupIntentCreateParams.AutomaticPaymentMethods.AllowRedirects.NEVER)
                         .build())
                 .putMetadata(StripeMetadata.USER_ID, userId.toString())
+                .putMetadata(StripeMetadata.CORRELATION_ID, MDC.get(PaymentMessageHeaders.CORRELATION_ID))
+                .putMetadata(StripeMetadata.TRACE_ID, currentTraceId())
                 .build();
         try {
             return stripeClient.setupIntents().create(params);
@@ -159,5 +172,10 @@ public class StripePaymentGateway {
             log.error("Stripe unavailable while detaching payment method {}", paymentMethodId, e);
             throw new ServiceUnavailableException("Stripe unavailable while detaching payment method " + paymentMethodId);
         }
+    }
+
+    private String currentTraceId() {
+        Span currentSpan = tracer.currentSpan();
+        return currentSpan != null ? currentSpan.context().traceId() : null;
     }
 }

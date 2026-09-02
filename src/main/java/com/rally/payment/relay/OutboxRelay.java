@@ -10,6 +10,7 @@ import java.util.regex.Pattern;
 
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
+import java.util.concurrent.ThreadLocalRandom;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -22,7 +23,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @EnableConfigurationProperties(OutboxRelayProperties.class)
 public class OutboxRelay {
 
-    private static final Pattern OTLP_TRACE_ID_PATTERN = Pattern.compile("^[0-9a-fA-F]{32}$");
+     static final Pattern OTLP_TRACE_ID_PATTERN = Pattern.compile("^[0-9a-fA-F]{32}$");
 
     private final OutboxJpaRepository outboxJpaRepository;
     private final OutboxPublisher outboxPublisher;
@@ -66,14 +67,7 @@ public class OutboxRelay {
 
         for (OutboxMessage message : pending) {
 
-            Span span = null;
-            String traceId = message.getTraceId();
-            if (traceId != null && OTLP_TRACE_ID_PATTERN.matcher(traceId).matches()) {
-                span = tracer.spanBuilder()
-                        .name("relay-outbox-message")
-                        .setParent(tracer.traceContextBuilder().traceId(traceId).build())
-                        .start();
-            }
+            Span span = reParentToStoredTrace(message);
 
             try (Tracer.SpanInScope spanInScope = span != null ? tracer.withSpan(span) : null) {
                 boolean ok = outboxPublisher.publish(message);
@@ -114,5 +108,24 @@ public class OutboxRelay {
 
         log.info("Outbox relay run: {} pending, {} published, {} retried, {} failed",
             pending.size(), published, retried, failed);
+    }
+
+    private Span reParentToStoredTrace(OutboxMessage message) {
+        String traceId = message.getTraceId();
+        if (traceId == null || !OTLP_TRACE_ID_PATTERN.matcher(traceId).matches()) {
+            return null;
+        }
+        return tracer.spanBuilder()
+                .name("relay-outbox-message")
+                .setParent(tracer.traceContextBuilder()
+                        .traceId(traceId)
+                        .spanId(randomValidSpanId())
+                        .sampled(true)
+                        .build())
+                .start();
+    }
+
+    public static String randomValidSpanId() {
+        return String.format("%016x", ThreadLocalRandom.current().nextLong());
     }
 }

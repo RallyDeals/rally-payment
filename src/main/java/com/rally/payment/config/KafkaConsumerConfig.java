@@ -1,7 +1,7 @@
 package com.rally.payment.config;
 
-import com.rally.payment.messaging.Interceptors.KafkaHeaderMdcInterceptor;
-import tools.jackson.databind.JsonNode;
+import com.rally.payment.filters.KafkaCorrelationIdInterceptor;
+import org.springframework.boot.kafka.autoconfigure.ConcurrentKafkaListenerContainerFactoryConfigurer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -11,16 +11,16 @@ import org.springframework.kafka.core.ConsumerFactory;
 public class KafkaConsumerConfig {
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, JsonNode> kafkaListenerContainerFactory(
-            ConsumerFactory<String, JsonNode> consumerFactory,
-            KafkaHeaderMdcInterceptor mdcInterceptor) {
+    public ConcurrentKafkaListenerContainerFactory<Object, Object> kafkaListenerContainerFactory(
+            ConcurrentKafkaListenerContainerFactoryConfigurer configurer,
+            ConsumerFactory<Object, Object> consumerFactory,
+            KafkaCorrelationIdInterceptor correlationIdInterceptor) {
 
-        ConcurrentKafkaListenerContainerFactory<String, JsonNode> factory =
+        ConcurrentKafkaListenerContainerFactory<Object, Object> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
 
-        factory.setConsumerFactory(consumerFactory);
-
-        factory.setRecordInterceptor(mdcInterceptor);
+        configurer.configure(factory, consumerFactory);
+        factory.setRecordInterceptor(correlationIdInterceptor);
 
         return factory;
     }

@@ -112,9 +112,10 @@ public class PaymentMethodService {
         PaymentMethod method = loadOwnedMethod(userId, methodId);
         if (!method.isDefault()) {
             clearDefaultForUser(userId, methodId);
+            paymentMethodRepository.flush();
+
             method.setDefault(true);
             paymentMethodRepository.save(method);
-            paymentMethodRepository.flush();
         }
         return PaymentMethodResponse.from(method);
     }

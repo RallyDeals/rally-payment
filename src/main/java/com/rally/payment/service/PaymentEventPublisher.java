@@ -117,23 +117,12 @@ public class PaymentEventPublisher {
         String incomingMessageId = MDC.get("incomingMessageId");
 
         Span currentSpan = tracer.currentSpan();
-        String micrometerTraceId = currentSpan != null ? currentSpan.context().traceId() : null;
-
-        String traceIdToUse = micrometerTraceId != null
-                ? micrometerTraceId
-                : (currentTraceId != null ? currentTraceId : paymentId.toString());
-
-        String correlationIdToUse = currentCorrelationId != null ? currentCorrelationId : orderId.toString();
-
-        String causationIdToUse = incomingMessageId != null ? incomingMessageId : traceIdToUse;
+        String traceId = currentSpan != null ? currentSpan.context().traceId() : null;
 
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put(PaymentMessageHeaders.ID, UUID.randomUUID().toString());
         headers.put(PaymentMessageHeaders.TYPE, type.value());
-
-        headers.put(PaymentMessageHeaders.CAUSATION_ID, causationIdToUse);
-        headers.put(PaymentMessageHeaders.CORRELATION_ID, correlationIdToUse);
-        headers.put(PaymentMessageHeaders.TRACE_ID, traceIdToUse);
+        headers.put(PaymentMessageHeaders.CORRELATION_ID, MDC.get(PaymentMessageHeaders.CORRELATION_ID));
 
         OutboxMessage outboxMessage = OutboxMessage.builder()
                 .messageId(UUID.randomUUID())
@@ -142,9 +131,7 @@ public class PaymentEventPublisher {
                 .topic("payment.events")
                 .messageKey(orderId.toString())
                 .messageType(type.value())
-                .correlationId(UUID.fromString(correlationIdToUse))
-                .causationId(causationIdToUse)
-                .traceId(traceIdToUse)
+                .traceId(traceId)
                 .payload(OBJECT_MAPPER.valueToTree(payload))
                 .headers(OBJECT_MAPPER.valueToTree(headers))
                 .status("PENDING")
