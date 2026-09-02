@@ -32,7 +32,7 @@ VALUES
     -- User 1: Visa (Success)
     ('c21f969b-5779-4328-82d1-935104d49d94',
      '4dc618d7-290b-4eee-8cb5-6115e6085b6b',
-     'CARD', 'pm_1U70vP0uquxxwDMnuBy27n0g', TRUE,
+     'CARD', 'pm_1U8iLl0uquxxwDMnGeD4YQY4', TRUE,
      'Visa', '4242', '12', '2029',
      'y9gJAW5rl4ecYQuX', 0),
 
