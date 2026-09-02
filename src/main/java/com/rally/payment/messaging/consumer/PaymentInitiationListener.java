@@ -14,12 +14,12 @@ import java.time.Instant;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
@@ -49,26 +49,25 @@ public class PaymentInitiationListener {
         @Header(PaymentMessageHeaders.ID) String messageId,
         @Header(PaymentMessageHeaders.TYPE) String messageType,
         @Header(value = PaymentMessageHeaders.CORRELATION_ID, required = false) String correlationId,
-        @Header(value = PaymentMessageHeaders.CAUSATION_ID, required = false) String causationId,
-        @Header(value = PaymentMessageHeaders.TRACE_ID, required = false) String traceId,
+        @Header(value = PaymentMessageHeaders.TRACEPARENT, required = false) String traceparent,
         @Payload JsonNode payload
     ) {
         PaymentMessageType resolvedType = PaymentMessageType.fromValue(messageType)
             .orElseThrow(() -> new IllegalArgumentException("Unsupported payment message type: " + messageType));
 
-        log.info("Kafka message consumed: messageId={}, type={}, topic={}, partition={}, offset={}",
-                messageId, messageType, record.topic(), record.partition(), record.offset());
+        log.info("Kafka message consumed: messageId={}, type={}, correlationId={}, topic={}, partition={}, offset={}",
+                messageId, messageType, correlationId, record.topic(), record.partition(), record.offset());
 
         InboxMessage inboxMessage = InboxMessage.builder()
             .messageId(messageId)
             .topic(record.topic())
             .messageType(messageType)
             .correlationId(parseUuid(correlationId))
-            .causationId(causationId)
-            .traceId(traceId)
+            .traceId(parseTraceId(traceparent))
             .payload(payload)
             .headers(toJsonNode(extractHeaders(record)))
             .status("RECEIVED")
+            .causationId(null)
             .build();
 
         try {
@@ -82,8 +81,8 @@ public class PaymentInitiationListener {
         try {
             dispatch(resolvedType, payload);
         } catch (Exception e) {
-            log.error("Kafka message processing failed: messageId={}, type={}, topic={}",
-                    messageId, messageType, record.topic(), e);
+            log.error("Kafka message processing failed: messageId={}, type={}, correlationId={}, topic={}",
+                    messageId, messageType, correlationId, record.topic(), e);
             throw e;
         }
 
@@ -91,7 +90,7 @@ public class PaymentInitiationListener {
         inboxMessage.setProcessedAt(Instant.now());
         inboxJpaRepository.save(inboxMessage);
 
-        log.info("Kafka message processed: messageId={}, type={}, topic={}", messageId, messageType, record.topic());
+        log.info("Kafka message processed: messageId={}, type={}, correlationId={}, topic={}", messageId, messageType, correlationId, record.topic());
     }
 
     private void dispatch(PaymentMessageType resolvedType, JsonNode payload) {
@@ -121,11 +120,31 @@ public class PaymentInitiationListener {
     }
 
     private Map<String, String> extractHeaders(ConsumerRecord<String, JsonNode> record) {
+        Set<String> allowedHeaders = Set.of(
+            PaymentMessageHeaders.ID,
+            PaymentMessageHeaders.TYPE,
+            PaymentMessageHeaders.CORRELATION_ID,
+            PaymentMessageHeaders.TRACEPARENT
+        );
         Map<String, String> headers = new LinkedHashMap<>();
-        record.headers().forEach(header -> headers.put(header.key(), new String(header.value(), StandardCharsets.UTF_8)));
+        record.headers().forEach(header -> {
+            if (allowedHeaders.contains(header.key())) {
+                headers.put(header.key(), new String(header.value(), StandardCharsets.UTF_8));
+            }
+        });
         headers.putIfAbsent(PaymentMessageHeaders.ID, record.key());
-        headers.putIfAbsent(KafkaHeaders.RECEIVED_TOPIC, record.topic());
         return headers;
+    }
+
+    private String parseTraceId(String traceparent) {
+        if (traceparent == null || traceparent.isBlank()) {
+            return null;
+        }
+        String[] parts = traceparent.split("-");
+        if (parts.length >= 2 && parts[1].length() == 32) {
+            return parts[1];
+        }
+        return null;
     }
 
     private UUID parseUuid(String value) {
