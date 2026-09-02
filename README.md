@@ -33,46 +33,22 @@ Rally Payments orchestrates card-based payments through Stripe, manages saved pa
 
 ## Architecture
 
-```
-                        ┌──────────────────────────────────────────────┐
-   Order Service ──────▶│  Kafka topic: order.payments_requested        │
-                        │                                              │
-                        │  ┌──────────────┐   ┌──────────────────────┐  │
-                        │  │   Inbox      │──▶│ PaymentInitiation     │  │
-                        │  │ (idempotent) │   │ Listener              │  │
-                        │  └──────────────┘   └──────────┬───────────┘  │
-                        │                                ▼              │
-                        │                        ┌──────────────────┐   │
-                        │                        │  PaymentService  │   │
-                        │                        └────────┬─────────┘   │
-                        │            Stripe PaymentGateway  │            │
-                        │              (PaymentIntents)     ▼            │
-                        │                        ┌──────────────────┐   │
-                        │                        │      Stripe       │   │
-                        │                        └──────────────────┘   │
-                        │                                │ events        │
-                        │                                ▼               │
-                        │                     ┌────────────────────┐    │
-                        │                     │ StripeWebhookService│    │
-                        │                     └────────────────────┘    │
-                        │   Payment aggregate ──▶ Domain events          │
-                        │   (AbstractAggregateRoot)                      │
-                        │        │                                        │
-                        │        ▼                                        │
-                        │  ┌───────────────────────┐   ┌───────────────┐ │
-                        │  │   Outbox (transactional│──▶│ OutboxRelay   │ │
-                        │  │    event publishing)   │   │  → Kafka      │ │
-                        │  └───────────────────────┘   └───────┬───────┘ │
-                        └──────────────────────────────────────┼─────────┘
-                                                               ▼
-                                              Kafka topic: payment.events
-```
+### System diagram
+
+![Architecture](docs/diagrams/architecture.png)
 
 ### Reliability patterns
 
-- **Transactional Outbox** — domain transitions and outbox rows are written in the same DB transaction by `PaymentEventPublisher` (driven by Spring domain events emitted from the `Payment` aggregate). `OutboxRelay` polls `PENDING` rows (`FOR UPDATE SKIP LOCKED`), publishes to Kafka, and tracks retries until `max_retries`.
-- **Inbox / Idempotency** — every consumed Kafka message is recorded in `inbox_messages` keyed by message id; duplicates are skipped. Stripe webhooks use the same inbox deduplication.
-- **Optimistic Locking** — `version` columns on `payments`, `payment_methods`, and `payment_profiles`.
+- **Transactional Outbox**
+  - Domain events + outbox row in same DB transaction
+  - `OutboxRelay` polls every 1s with `FOR UPDATE SKIP LOCKED`
+- **Inbox / Idempotency**
+  - Kafka messages and Stripe webhooks deduplicated by message ID
+  - Duplicate consumed messages silently skipped
+- **Stripe Integration**
+  - PaymentIntents for charge and authorize flows
+  - SetupIntents for buyer wallet card storage
+  - Lazy Stripe Customer provisioning per user
 
 ---
 
