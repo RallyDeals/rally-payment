@@ -1,6 +1,8 @@
 package com.rally.payment.filters;
 
 import com.rally.payment.messaging.contract.PaymentMessageHeaders;
+import io.micrometer.tracing.BaggageInScope;
+import io.micrometer.tracing.BaggageManager;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,6 +20,11 @@ import java.util.UUID;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class CorrelationIdFilter extends OncePerRequestFilter {
 
+    private final BaggageManager baggageManager;
+
+    public CorrelationIdFilter(BaggageManager baggageManager) {
+        this.baggageManager = baggageManager;
+    }
 
     @Override
     protected void doFilterInternal(
@@ -26,31 +33,26 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
             FilterChain filterChain) throws ServletException, IOException {
 
         String correlationId = request.getHeader(PaymentMessageHeaders.CORRELATION_ID);
-        String traceId = request.getHeader(PaymentMessageHeaders.TRACE_ID);
 
         if(correlationId == null || correlationId.isBlank()){
             correlationId = UUID.randomUUID().toString();
         }
 
-        if(traceId == null || traceId.isBlank()){
-            traceId = UUID.randomUUID().toString();
-        }
 
         MDC.put(PaymentMessageHeaders.CORRELATION_ID,correlationId);
-        MDC.put(PaymentMessageHeaders.TRACE_ID,traceId);
+
+        try (BaggageInScope ignored = baggageManager.createBaggageInScope(
+                PaymentMessageHeaders.CORRELATION_ID, correlationId)) {
+
+            response.addHeader(PaymentMessageHeaders.CORRELATION_ID,correlationId);
 
 
-        response.addHeader(PaymentMessageHeaders.CORRELATION_ID,correlationId);
-        response.addHeader(PaymentMessageHeaders.TRACE_ID,traceId);
+            try {
+                filterChain.doFilter(request, response);
+            } finally {
+                MDC.remove(PaymentMessageHeaders.CORRELATION_ID);
 
-        try {
-            filterChain.doFilter(request, response);
-        } finally {
-            MDC.remove(PaymentMessageHeaders.CORRELATION_ID);
-            MDC.remove(PaymentMessageHeaders.TRACE_ID);
+            }
         }
-
-
-
     }
 }

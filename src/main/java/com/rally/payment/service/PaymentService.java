@@ -146,11 +146,11 @@ public class PaymentService {
         try {
             intent = stripePaymentGateway.capture(payment.getPaymentIntentId(), payment.getId());
         } catch (CardException e) {
-            log.warn("Card error while capturing payment intent for payment {}", payment.getId(), e);
+           // log.warn("Card error while capturing payment intent for payment {}", payment.getId(), e);
             failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage(), stripePaymentGateway.errorCodeOf(e));
             return;
         } catch (InvalidRequestException e) {
-            log.warn("Invalid Stripe request while capturing payment intent for payment {}", payment.getId(), e);
+            log.warn("Invalid Stripe request while capturing payment intent for payment {}", payment.getId());
             failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage(), stripePaymentGateway.errorCodeOf(e));
             return;
         }
@@ -293,7 +293,7 @@ public class PaymentService {
             failPaymentAndPublish(payment, paymentMethod.getId(), stripePaymentGateway.intentIdOf(e), e.getMessage(), stripePaymentGateway.errorCodeOf(e));
             return null;
         } catch (InvalidRequestException e) {
-            log.warn("Invalid Stripe request while creating payment intent for payment {}", payment.getId(), e);
+            log.warn("Invalid Stripe request while creating payment intent for payment {}", payment.getId());
             failPaymentAndPublish(payment, paymentMethod.getId(), null, e.getMessage(), stripePaymentGateway.errorCodeOf(e));
             return null;
         }
@@ -304,11 +304,11 @@ public class PaymentService {
         try {
             intent = stripePaymentGateway.cancel(payment.getPaymentIntentId(), payment.getId());
         } catch (CardException e) {
-            log.warn("Card error while canceling payment intent for payment {}", payment.getId(), e);
+           // log.warn("Card error while canceling payment intent for payment {}", payment.getId(), e);
             failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage(), stripePaymentGateway.errorCodeOf(e));
             return false;
         } catch (InvalidRequestException e) {
-            log.warn("Invalid Stripe request while canceling payment intent for payment {}", payment.getId(), e);
+            log.warn("Invalid Stripe request while canceling payment intent for payment {}", payment.getId());
             failPaymentAndPublish(payment, payment.getPaymentMethodId(), payment.getPaymentIntentId(), e.getMessage(), stripePaymentGateway.errorCodeOf(e));
             return false;
         }

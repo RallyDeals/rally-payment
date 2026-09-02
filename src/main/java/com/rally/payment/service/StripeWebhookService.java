@@ -7,6 +7,7 @@ import com.rally.common.exceptions.shared.BadRequestException;
 import com.rally.common.exceptions.shared.ValidationException;
 import com.rally.payment.config.StripeProperties;
 import com.rally.payment.enums.PaymentStatus;
+import com.rally.payment.messaging.contract.PaymentMessageHeaders;
 import com.rally.payment.messaging.inbox.InboxMessage;
 import com.rally.payment.metrics.PaymentMetrics;
 import com.rally.payment.model.Payment;
@@ -28,18 +29,19 @@ import io.micrometer.core.instrument.Timer;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
+
+import io.micrometer.tracing.*;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import static com.rally.payment.relay.OutboxRelay.randomValidSpanId;
 
 @Slf4j
 @Service
 public class StripeWebhookService {
-
-    private static final String STRIPE_STATUS_SUCCEEDED = "succeeded";
-    private static final String STRIPE_STATUS_CANCELED = "canceled";
-    private static final String STRIPE_STATUS_REQUIRES_CAPTURE = "requires_capture";
     private static final String EVENT_PAYMENT_INTENT_SUCCEEDED = "payment_intent.succeeded";
     private static final String EVENT_PAYMENT_INTENT_CANCELED = "payment_intent.canceled";
     private static final String EVENT_PAYMENT_INTENT_PAYMENT_FAILED = "payment_intent.payment_failed";
@@ -48,6 +50,7 @@ public class StripeWebhookService {
     private static final String PAYMENT_METHOD_TYPE_CARD = "card";
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final Pattern OTLP_TRACE_ID_PATTERN = Pattern.compile("^[0-9a-fA-F]{32}$");
 
     private final InboxJpaRepository inboxJpaRepository;
     private final PaymentJpaRepository paymentRepository;
@@ -55,6 +58,8 @@ public class StripeWebhookService {
     private final StripeClient stripeClient;
     private final StripeProperties stripeProperties;
     private final PaymentMetrics metrics;
+    private  final Tracer tracer;
+    private final BaggageManager baggageManager;
 
     public StripeWebhookService(
             InboxJpaRepository inboxJpaRepository,
@@ -62,7 +67,7 @@ public class StripeWebhookService {
             PaymentMethodJpaRepository paymentMethodRepository,
             StripeClient stripeClient,
             StripeProperties stripeProperties,
-            PaymentMetrics metrics
+            PaymentMetrics metrics, Tracer tracer, BaggageManager baggageManager
     ) {
         this.inboxJpaRepository = inboxJpaRepository;
         this.paymentRepository = paymentRepository;
@@ -70,36 +75,50 @@ public class StripeWebhookService {
         this.stripeClient = stripeClient;
         this.stripeProperties = stripeProperties;
         this.metrics = metrics;
+        this.tracer = tracer;
+        this.baggageManager = baggageManager;
     }
 
     public Event verifyStripeEvent(String payload, String signature) {
         try {
             return Webhook.constructEvent(payload, signature, stripeProperties.getWebhookSecret());
         } catch (StripeException e) {
-            log.warn("Rejected Stripe webhook with invalid signature (no payload/signature logged)");
+            log.warn("Rejected Stripe webhook with invalid signature",e);
             throw new BadRequestException("Invalid Stripe webhook signature");
         }
     }
 
     @Transactional
     public void processStripeEvent(Event event) {
-        metrics.recordWebhookReceived(event.getType());
-        log.info("Stripe webhook received: eventType={}, eventId={}", event.getType(), event.getId());
+
+        String corrId = readMetadata(event, StripeMetadata.CORRELATION_ID);
+        String traceId = readMetadata(event, StripeMetadata.TRACE_ID);
+        Span span = reParentToStoredTrace(traceId);
         Timer.Sample sample = metrics.startWebhookProcessing();
-        try {
-            processStripeEventInternal(event);
+
+        try (Tracer.SpanInScope scope = span != null ? tracer.withSpan(span) : null;
+             BaggageInScope bg = corrId != null
+                     ? baggageManager.createBaggageInScope(PaymentMessageHeaders.CORRELATION_ID, corrId) : null) {
+            if (corrId != null) MDC.put(PaymentMessageHeaders.CORRELATION_ID, corrId);
+            metrics.recordWebhookReceived(event.getType());
+            log.info("Stripe webhook received: eventType={}, eventId={}", event.getType(), event.getId());
+            processStripeEventInternal(event, corrId, traceId);
         } finally {
+            if (corrId != null) MDC.remove(PaymentMessageHeaders.CORRELATION_ID);
+            if (span != null) span.end();
             metrics.stopWebhookProcessing(sample);
         }
     }
 
-    private void processStripeEventInternal(Event event) {
-        String messageId = event.getId();
 
+    private void processStripeEventInternal(Event event, String corrId, String traceId) {
+        String messageId = event.getId();
         InboxMessage inboxMessage = InboxMessage.builder()
                 .messageId(messageId)
                 .topic("stripe.webhook")
                 .messageType(event.getType())
+                .correlationId(corrId != null ? parseUuid(corrId) : null)
+                .traceId(traceId)
                 .payload(OBJECT_MAPPER.valueToTree(event.getData().getObject()))
                 .status("RECEIVED")
                 .build();
@@ -132,13 +151,13 @@ public class StripeWebhookService {
 
         String intentId = readIntentId(event);
         if (intentId == null) {
-            log.info("Stripe webhook {} has no payment intent id; ignoring", event.getId());
+            log.debug("Stripe webhook {} has no payment intent id; ignoring", event.getId());
             return;
         }
 
         Optional<Payment> byIntent = paymentRepository.findByPaymentIntentId(intentId);
         if (byIntent.isEmpty()) {
-            log.info("Stripe webhook {} references unknown payment intent {}; ignoring", event.getId(), intentId);
+            log.debug("Stripe webhook {} references unknown payment intent {}; ignoring", event.getId(), intentId);
             return;
         }
 
@@ -147,7 +166,7 @@ public class StripeWebhookService {
             case EVENT_PAYMENT_INTENT_SUCCEEDED -> applySucceeded(payment, intentId);
             case EVENT_PAYMENT_INTENT_CANCELED -> applyCanceled(payment);
             case EVENT_PAYMENT_INTENT_PAYMENT_FAILED -> applyFailed(payment, intentId, readLastPaymentError(event));
-            default -> log.info("Stripe webhook {} of type {} is not mapped; safe ignore", event.getId(), event.getType());
+            default -> log.debug("Stripe webhook {} of type {} is not mapped; safe ignore", event.getId(), event.getType());
         }
     }
 
@@ -214,37 +233,37 @@ public class StripeWebhookService {
                 payment.charge(intentId);
                 paymentRepository.save(payment);
             } else {
-                log.info("Webhook payment_intent.succeeded is a no-op for payment {} in state {}",
+                log.debug("Webhook payment_intent.succeeded is a no-op for payment {} in state {}",
                         payment.getId(), payment.getStatus());
             }
         } catch (InvalidPaymentStateException e) {
-            log.info("Webhook payment_intent.succeeded safely skipped for payment {}: {}", payment.getId(), e.getMessage());
+            log.debug("Webhook payment_intent.succeeded safely skipped for payment {}: {}", payment.getId(), e.getMessage());
         }
     }
 
     private void applyCanceled(Payment payment) {
         if (payment.getStatus() == PaymentStatus.VOIDED) {
-            log.info("Webhook payment_intent.canceled is a no-op for already-voided payment {}", payment.getId());
+            log.debug("Webhook payment_intent.canceled is a no-op for already-voided payment {}", payment.getId());
             return;
         }
         try {
             payment.voidPayment("webhook: payment_intent.canceled");
             paymentRepository.save(payment);
         } catch (InvalidPaymentStateException e) {
-            log.info("Webhook payment_intent.canceled safely skipped for payment {}: {}", payment.getId(), e.getMessage());
+            log.debug("Webhook payment_intent.canceled safely skipped for payment {}: {}", payment.getId(), e.getMessage());
         }
     }
 
     private void applyFailed(Payment payment, String intentId, String reason) {
         if (payment.getStatus() == PaymentStatus.FAILED) {
-            log.info("Webhook payment_intent.payment_failed is a no-op for already-failed payment {}", payment.getId());
+            log.debug("Webhook payment_intent.payment_failed is a no-op for already-failed payment {}", payment.getId());
             return;
         }
         try {
             payment.fail(reason, payment.getPaymentMethodId(), intentId);
             paymentRepository.save(payment);
         } catch (InvalidPaymentStateException e) {
-            log.info("Webhook payment_intent.payment_failed safely skipped for payment {}: {}", payment.getId(), e.getMessage());
+            log.debug("Webhook payment_intent.payment_failed safely skipped for payment {}: {}", payment.getId(), e.getMessage());
         }
     }
 
@@ -273,4 +292,28 @@ public class StripeWebhookService {
             return null;
         }
     }
+
+    private String readMetadata(Event event, String key) {
+        JsonNode object = readEventObject(event);
+        return object != null && object.path("metadata").hasNonNull(key)
+                ? object.path("metadata").get(key).asText(null)
+                : null;
+    }
+
+    private UUID parseUuid(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+
+        return UUID.fromString(value);
+    }
+
+    private Span reParentToStoredTrace(String traceId) {
+        if (traceId == null || !OTLP_TRACE_ID_PATTERN.matcher(traceId).matches()) return null;
+        return tracer.spanBuilder().name("process-stripe-webhook")
+                .setParent(tracer.traceContextBuilder()
+                        .traceId(traceId).spanId(randomValidSpanId()).sampled(true).build())
+                .start();
+    }
+
 }
