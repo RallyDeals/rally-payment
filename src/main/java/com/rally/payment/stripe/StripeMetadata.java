@@ -7,6 +7,8 @@ public final class StripeMetadata {
     public static final String USER_ID = "user_id";
     public static final String CUSTOMER_ID = "customer_id";
     public static final String SETUP_INTENT_ID = "setup_intent_id";
+    public static final String CORRELATION_ID = "correlation_id";
+    public static final String TRACE_ID = "trace_id";
 
     private StripeMetadata() {
     }
