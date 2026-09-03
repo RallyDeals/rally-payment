@@ -5,12 +5,11 @@ import java.util.UUID;
 
 public record PaymentRequiresAction(
     UUID aggregateId,
-    String paymentIntentId,
     UUID orderId,
     Instant occurredAt
 ) implements DomainEvent {
-    public PaymentRequiresAction(UUID aggregateId, String paymentIntentId, UUID orderId) {
-        this(aggregateId, paymentIntentId, orderId, Instant.now());
+    public PaymentRequiresAction(UUID aggregateId, UUID orderId) {
+        this(aggregateId, orderId, Instant.now());
     }
 
     @Override
