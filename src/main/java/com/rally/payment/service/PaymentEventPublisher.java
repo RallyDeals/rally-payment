@@ -56,19 +56,19 @@ public class PaymentEventPublisher {
         switch (event) {
             case PaymentCharged e -> {
                 metrics.recordPaymentSucceeded(currency(), PAYMENT_METHOD_CARD);
-                writeOutcomeOutbox(e.aggregateId(), e.orderId(), e.paymentIntentId(), e.amount(), PaymentMessageType.CHARGED);
+                writeOutcomeOutbox(e.aggregateId(), e.orderId(), e.amount(), PaymentMessageType.CHARGED);
             }
             case PaymentCaptured e -> {
                 metrics.recordPaymentSucceeded(currency(), PAYMENT_METHOD_CARD);
-                writeOutcomeOutbox(e.aggregateId(), e.orderId(), e.paymentIntentId(), e.amount(), PaymentMessageType.CAPTURED);
+                writeOutcomeOutbox(e.aggregateId(), e.orderId(), e.amount(), PaymentMessageType.CAPTURED);
             }
             case PaymentAuthorized e -> {
                 metrics.recordPaymentSucceeded(currency(), PAYMENT_METHOD_CARD);
-                writeOutcomeOutbox(e.aggregateId(), e.orderId(), e.paymentIntentId(), e.amount(), PaymentMessageType.AUTHORIZED);
+                writeOutcomeOutbox(e.aggregateId(), e.orderId(), e.amount(), PaymentMessageType.AUTHORIZED);
             }
             case PaymentVoided e -> {
                 metrics.recordPaymentSucceeded(currency(), PAYMENT_METHOD_CARD);
-                writeOutcomeOutbox(e.aggregateId(), e.orderId(), e.paymentIntentId(), e.amount(), PaymentMessageType.VOIDED);
+                writeOutcomeOutbox(e.aggregateId(), e.orderId(), e.amount(), PaymentMessageType.VOIDED);
             }
             case PaymentFailed e -> {
                 metrics.recordPaymentFailed(currency(), PAYMENT_METHOD_CARD);
@@ -94,23 +94,21 @@ public class PaymentEventPublisher {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("paymentId", event.aggregateId());
         payload.put("orderId", event.orderId());
-        payload.put("paymentIntentId", event.paymentIntentId());
         payload.put("amount", event.amount());
         payload.put("errorMessage", event.failureReason());
         payload.put("errorCode", event.errorCode());
-        writeOutbox(event.aggregateId(), event.orderId(), event.paymentIntentId(), PaymentMessageType.FAILED, payload);
+        writeOutbox(event.aggregateId(), event.orderId(), PaymentMessageType.FAILED, payload);
     }
 
-    private void writeOutcomeOutbox(UUID paymentId, UUID orderId, String paymentIntentId, BigDecimal amount, PaymentMessageType type) {
+    private void writeOutcomeOutbox(UUID paymentId, UUID orderId, BigDecimal amount, PaymentMessageType type) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("paymentId", paymentId);
         payload.put("orderId", orderId);
-        payload.put("paymentIntentId", paymentIntentId);
         payload.put("amount", amount);
-        writeOutbox(paymentId, orderId, paymentIntentId, type, payload);
+        writeOutbox(paymentId, orderId, type, payload);
     }
 
-    private void writeOutbox(UUID paymentId, UUID orderId, String paymentIntentId, PaymentMessageType type, Map<String, Object> payload) {
+    private void writeOutbox(UUID paymentId, UUID orderId, PaymentMessageType type, Map<String, Object> payload) {
 
         String currentTraceId = MDC.get("traceId");
         String currentCorrelationId = MDC.get("correlationId");
