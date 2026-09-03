@@ -134,7 +134,7 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         this.paymentIntentId = paymentIntentId;
         this.failureReason = null;
         this.chargedAt = Instant.now();
-        registerEvent(new PaymentCharged(id, paymentIntentId, orderId, amount));
+        registerEvent(new PaymentCharged(id, orderId, amount));
         log.info("Payment {} transitioned {} -> CHARGED (intent {}, order {})", id, from, paymentIntentId, orderId);
     }
 
@@ -150,7 +150,7 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         PaymentStatus from = status;
         status = PaymentStatus.CAPTURED;
         this.capturedAt = Instant.now();
-        registerEvent(new PaymentCaptured(id, paymentIntentId, orderId, amount));
+        registerEvent(new PaymentCaptured(id, orderId, amount));
         log.info("Payment {} transitioned {} -> CAPTURED (intent {}, order {})", id, from, paymentIntentId, orderId);
     }
 
@@ -168,7 +168,7 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         this.paymentMethodId = paymentMethodId;
         this.paymentIntentId = paymentIntentId;
         this.authorizedAt = Instant.now();
-        registerEvent(new PaymentAuthorized(id, paymentIntentId, orderId, amount));
+        registerEvent(new PaymentAuthorized(id, orderId, amount));
         log.info("Payment {} transitioned {} -> AUTHORIZED (intent {}, order {})", id, from, paymentIntentId, orderId);
     }
 
@@ -187,7 +187,7 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         this.paymentMethodId = paymentMethodId;
         this.paymentIntentId = paymentIntentId;
         this.failedAt = Instant.now();
-        registerEvent(new PaymentFailed(id, paymentIntentId, orderId, amount, reason, errorCode));
+        registerEvent(new PaymentFailed(id, orderId, amount, reason, errorCode));
         log.info("Payment {} transitioned {} -> FAILED (intent {}, reason: {}, errorCode: {})",
                 id, from, paymentIntentId, reason, errorCode);
     }
@@ -201,7 +201,7 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         status = PaymentStatus.VOIDED;
         this.voidedAt = Instant.now();
         this.failureReason = reason;
-        registerEvent(new PaymentVoided(id, paymentIntentId, orderId, amount));
+        registerEvent(new PaymentVoided(id, orderId, amount));
         log.info("Payment {} transitioned {} -> VOIDED (intent {}, reason: {})", id, from, paymentIntentId, reason);
     }
 
@@ -214,7 +214,7 @@ public class Payment extends AbstractAggregateRoot<Payment> {
         status = PaymentStatus.REQUIRES_ACTION;
         this.paymentMethodId = paymentMethodId;
         this.paymentIntentId = paymentIntentId;
-        registerEvent(new PaymentRequiresAction(id, paymentIntentId, orderId));
+        registerEvent(new PaymentRequiresAction(id, orderId));
         log.info("Payment {} transitioned {} -> REQUIRES_ACTION (intent {}, order {})",
                 id, from, paymentIntentId, orderId);
     }
